@@ -1,15 +1,17 @@
 'use strict';
 
-var async = require('async'),
-	fs = require('fs'),
-	nconf = require('nconf'),
-	winston = require('winston'),
+var async = require('async');
+var fs = require('fs');
+var nconf = require('nconf');
+var winston = require('winston');
 
-	db = require('../../database'),
-	user = require('../../user'),
-	meta = require('../../meta'),
-	helpers = require('../helpers'),
-	accountHelpers = require('./helpers');
+var db = require('../../database');
+var user = require('../../user');
+var meta = require('../../meta');
+var plugins = require('../../plugins');
+var helpers = require('../helpers');
+var groups = require('../../groups');
+var accountHelpers = require('./helpers');
 
 var editController = {};
 
@@ -19,10 +21,30 @@ editController.get = function(req, res, callback) {
 			return callback(err);
 		}
 
+		userData.maximumSignatureLength = parseInt(meta.config.maximumSignatureLength, 10) || 255;
+		userData.maximumAboutMeLength = parseInt(meta.config.maximumAboutMeLength, 10) || 1000;
+		userData.maximumProfileImageSize = parseInt(meta.config.maximumProfileImageSize, 10);
+		userData.allowProfileImageUploads = parseInt(meta.config.allowProfileImageUploads) === 1;
+		userData.allowAccountDelete = parseInt(meta.config.allowAccountDelete, 10) === 1;
+
+		userData.groups = userData.groups.filter(function(group) {
+			return group && group.userTitleEnabled && !groups.isPrivilegeGroup(group.name) && group.name !== 'registered-users';
+		});
+		userData.groups.forEach(function(group) {
+			group.selected = group.name === userData.groupTitle;
+		});
+
 		userData.title = '[[pages:account/edit, ' + userData.username + ']]';
 		userData.breadcrumbs = helpers.buildBreadcrumbs([{text: userData.username, url: '/user/' + userData.userslug}, {text: '[[user:edit]]'}]);
+		userData.editButtons = [];
 
-		res.render('account/edit', userData);
+		plugins.fireHook('filter:user.account.edit', userData, function(err, userData) {
+			if (err) {
+				return callback(err);
+			}
+
+			res.render('account/edit', userData);
+		});
 	});
 };
 
@@ -42,6 +64,13 @@ function renderRoute(name, req, res, next) {
 	getUserData(req, next, function(err, userData) {
 		if (err) {
 			return next(err);
+		}
+		if ((name === 'username' && userData['username:disableEdit']) || (name === 'email' && userData['email:disableEdit'])) {
+			return next();
+		}
+
+		if (name === 'password') {
+			userData.minimumPasswordLength = parseInt(meta.config.minimumPasswordLength, 10);
 		}
 
 		userData.title = '[[pages:account/edit/' + name + ', ' + userData.username + ']]';
@@ -73,7 +102,6 @@ function getUserData(req, next, callback) {
 			return callback(err);
 		}
 
-		userData['username:disableEdit'] = parseInt(meta.config['username:disableEdit'], 10) === 1;
 		userData.hasPassword = !!password;
 		callback(null, userData);
 	});
@@ -82,35 +110,32 @@ function getUserData(req, next, callback) {
 editController.uploadPicture = function (req, res, next) {
 	var userPhoto = req.files.files[0];
 
-	var updateUid = req.uid;
+	var updateUid;
 
 	async.waterfall([
 		function(next) {
 			user.getUidByUserslug(req.params.userslug, next);
 		},
 		function(uid, next) {
-			if (parseInt(updateUid, 10) === parseInt(uid, 10)) {
-				return next();
+			updateUid = uid;
+			if (parseInt(req.uid, 10) === parseInt(uid, 10)) {
+				return next(null, true);
 			}
 
-			user.isAdministrator(req.uid, function(err, isAdmin) {
-				if (err) {
-					return next(err);
-				}
-
-				if (!isAdmin) {
-					return helpers.notAllowed(req, res);
-				}
-				updateUid = uid;
-				next();
-			});
+			user.isAdminOrGlobalMod(req.uid, next);
 		},
-		function(next) {
+		function(isAllowed, next) {
+			if (!isAllowed) {
+				return helpers.notAllowed(req, res);
+			}
+
 			user.uploadPicture(updateUid, userPhoto, next);
 		}
 	], function(err, image) {
 		fs.unlink(userPhoto.path, function(err) {
-			winston.error('unable to delete picture ' + userPhoto.path, err);
+			if (err) {
+				winston.warn('[user/picture] Unable to delete picture ' + userPhoto.path, err);
+			}
 		});
 		if (err) {
 			return next(err);

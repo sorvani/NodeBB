@@ -49,6 +49,14 @@
 				<input id="postEditDuration" type="text" class="form-control" value="0" data-field="postEditDuration">
 			</div>
 			<div class="form-group">
+				<label for="postDeleteDuration">Number of seconds users are allowed to delete posts after posting. (0 disabled)</label>
+				<input id="postDeleteDuration" type="text" class="form-control" value="0" data-field="postDeleteDuration">
+			</div>
+			<div class="form-group">
+				<label for="preventTopicDeleteAfterReplies">Number of replies after users are disallowed to delete their own topics. (0 disabled)</label>
+				<input id="preventTopicDeleteAfterReplies" type="text" class="form-control" value="0" data-field="preventTopicDeleteAfterReplies">
+			</div>
+			<div class="form-group">
 				<label for="minimumTitleLength">Minimum Title Length</label>
 				<input id="minimumTitleLength" type="text" class="form-control" value="3" data-field="minimumTitleLength">
 			</div>
@@ -83,7 +91,8 @@
 			<div class="form-group">
 				<label>Teaser Post</label>
 				<select class="form-control" data-field="teaserPost">
-					<option value="last">Last</option>
+					<option value="last-post">Last &ndash; Show the latest post, including the original post, if no replies</option>
+					<option value="last-reply">Last &ndash; Show the latest reply, or a "No replies" placeholder if no replies</option>
 					<option value="first">First</option>
 				</select>
 			</div>
@@ -91,6 +100,22 @@
 	</div>
 </div>
 
+
+<div class="row">
+	<div class="col-sm-2 col-xs-12 settings-header">Unread Settings</div>
+	<div class="col-sm-10 col-xs-12">
+		<form>
+			<div class="form-group">
+				<label for="unreadCutoff">Unread cutoff days</label>
+				<input id="unreadCutoff" type="text" class="form-control" value="2" data-field="unreadCutoff">
+			</div>
+			<div class="form-group">
+ 				<label for="bookmarkthreshold">Minimum posts in topic before tracking last read</label>
+ 				<input id="bookmarkthreshold" type="text" class="form-control" value="5" data-field="bookmarkThreshold">
+ 			</div>
+		</form>
+	</div>
+</div>
 
 <div class="row">
 	<div class="col-sm-2 col-xs-12 settings-header">Signature Settings</div>
@@ -118,35 +143,6 @@
 				<label>Maximum Signature Length</label>
 				<input type="text" class="form-control" value="255" data-field="maximumSignatureLength">
 			</div>
-		</form>
-	</div>
-</div>
-
-<div class="row">
-	<div class="col-sm-2 col-xs-12 settings-header">Upload Settings</div>
-	<div class="col-sm-10 col-xs-12">
-		<form>
-			<div class="checkbox">
-				<label class="mdl-switch mdl-js-switch mdl-js-ripple-effect">
-					<input class="mdl-switch__input" type="checkbox" data-field="allowFileUploads">
-					<span class="mdl-switch__label"><strong>Allow users to upload regular files</strong></span>
-				</label>
-			</div>
-			<div class="checkbox">
-				<label class="mdl-switch mdl-js-switch mdl-js-ripple-effect">
-					<input class="mdl-switch__input" type="checkbox" data-field="privateUploads">
-					<span class="mdl-switch__label"><strong>Make uploaded files private</strong></span>
-				</label>
-			</div>
-			<strong>Maximum File Size</strong><br /> <input type="text" class="form-control" value="2048" data-field="maximumFileSize"><br />
-
-			<div class="checkbox">
-				<label class="mdl-switch mdl-js-switch mdl-js-ripple-effect">
-					<input class="mdl-switch__input" type="checkbox" data-field="allowTopicsThumbnail">
-					<span class="mdl-switch__label"><strong>Allow users to upload topic thumbnails</strong></span>
-				</label>
-			</div>
-			<strong>Topic Thumb Size</strong><br /> <input type="text" class="form-control" value="120" data-field="topicThumbSize"> <br />
 		</form>
 	</div>
 </div>

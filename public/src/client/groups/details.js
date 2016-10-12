@@ -1,5 +1,5 @@
 "use strict";
-/* globals define, socket, ajaxify, app, bootbox, utils, RELATIVE_PATH */
+/* globals define, socket, ajaxify, app, bootbox, utils, config */
 
 define('forum/groups/details', [
 	'forum/groups/memberlist',
@@ -30,7 +30,11 @@ define('forum/groups/details', [
 					}, callback);
 				},
 				function() {
-					uploader.open(RELATIVE_PATH + '/api/groups/uploadpicture', { groupName: groupName }, 0, function(imageUrlOnServer) {
+					uploader.show({
+						title: '[[groups:upload-group-cover]]',
+						route: config.relative_path + '/api/groups/uploadpicture',
+						params: {groupName: groupName}
+					}, function(imageUrlOnServer) {
 						components.get('groups/cover').css('background-image', 'url(' + imageUrlOnServer + ')');
 					});
 				},
@@ -47,7 +51,7 @@ define('forum/groups/details', [
 		detailsPage.on('click', '[data-action]', function() {
 			var btnEl = $(this),
 				userRow = btnEl.parents('[data-uid]'),
-				ownerFlagEl = userRow.find('.member-name i'),
+				ownerFlagEl = userRow.find('.member-name > i'),
 				isOwner = !ownerFlagEl.hasClass('invisible') ? true : false,
 				uid = userRow.attr('data-uid'),
 				action = btnEl.attr('data-action');
@@ -223,23 +227,41 @@ define('forum/groups/details', [
 	};
 
 	function handleMemberInvitations() {
-		if (ajaxify.data.group.isOwner) {
-			var searchInput = $('[component="groups/members/invite"]');
-			require(['autocomplete'], function(autocomplete) {
-				autocomplete.user(searchInput, function(e, selected) {
-					socket.emit('groups.issueInvite', {
-						toUid: selected.item.user.uid,
-						groupName: ajaxify.data.group.name
-					}, function(err) {
-						if (!err) {
-							ajaxify.refresh();
-						} else {
-							app.alertError(err.message);
-						}
-					});
+		if (!ajaxify.data.group.isOwner) {
+			return;
+		}
+
+		var searchInput = $('[component="groups/members/invite"]');
+		require(['autocomplete'], function(autocomplete) {
+			autocomplete.user(searchInput, function(event, selected) {
+				socket.emit('groups.issueInvite', {
+					toUid: selected.item.user.uid,
+					groupName: ajaxify.data.group.name
+				}, function(err) {
+					if (err) {
+						return app.alertError(err.message);
+					}
+					ajaxify.refresh();
 				});
 			});
-		}
+		});
+
+		$('[component="groups/members/bulk-invite-button"]').on('click', function() {
+			var usernames = $('[component="groups/members/bulk-invite"]').val();
+			if (!usernames) {
+				return false;
+			}
+			socket.emit('groups.issueMassInvite', {
+				usernames: usernames,
+				groupName: ajaxify.data.group.name
+			}, function(err) {
+				if (err) {
+					return app.alertError(err.message);
+				}
+				ajaxify.refresh();
+			});
+			return false;
+		});
 	}
 
 	function removeCover() {

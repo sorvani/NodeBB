@@ -2,6 +2,7 @@
 
 var async = require('async');
 var winston = require('winston');
+var path = require('path');
 
 var user = require('../../user');
 var plugins = require('../../plugins');
@@ -37,6 +38,10 @@ module.exports = function(SocketUser) {
 							type: type,
 							picture: undefined
 						}, function(err, returnData) {
+							if (err) {
+								return next(err);
+							}
+
 							next(null, returnData.picture || '');
 						});
 						break;
@@ -50,7 +55,7 @@ module.exports = function(SocketUser) {
 
 	SocketUser.uploadProfileImageFromUrl = function(socket, data, callback) {
 		if (!socket.uid || !data.url || !data.uid) {
-			return;
+			return callback(new Error('[[error:invalid-data]]'));
 		}
 
 		user.isAdminOrSelf(socket.uid, data.uid, function(err) {
@@ -65,7 +70,7 @@ module.exports = function(SocketUser) {
 
 	SocketUser.removeUploadedPicture = function(socket, data, callback) {
 		if (!socket.uid || !data.uid) {
-			return;
+			return callback(new Error('[[error:invalid-data]]'));
 		}
 
 		async.waterfall([
@@ -73,20 +78,21 @@ module.exports = function(SocketUser) {
 				user.isAdminOrSelf(socket.uid, data.uid, next);
 			},
 			function (next) {
-				user.getUserField(data.uid, 'uploadedpicture', next);
+				user.getUserFields(data.uid, ['uploadedpicture', 'picture'], next);
 			},
-			function(uploadedPicture, next) {
-				if (!uploadedPicture.startsWith('http')) {
-					require('fs').unlink(uploadedPicture, function(err) {
+			function(userData, next) {
+				if (!userData.uploadedpicture.startsWith('http')) {
+					require('fs').unlink(path.join(__dirname, '../../../public', userData.uploadedpicture), function(err) {
 						if (err) {
 							winston.error(err);
 						}
 					});
 				}
-				user.setUserField(data.uid, 'uploadedpicture', '', next);
-			},
-			function(next) {
-				user.getUserField(data.uid, 'picture', next);
+
+				user.setUserFields(data.uid, {
+					uploadedpicture: '',
+					picture: userData.uploadedpicture === userData.picture ? '' : userData.picture	// if current picture is uploaded picture, reset to user icon
+				}, next);
 			}
 		], callback);
 	};

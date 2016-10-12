@@ -1,15 +1,15 @@
 'use strict';
 
-var nconf = require('nconf'),
-	async = require('async'),
-	S = require('string'),
+var nconf = require('nconf');
+var async = require('async');
+var S = require('string');
 
-	user = require('../../user'),
-	posts = require('../../posts'),
-	plugins = require('../../plugins'),
-	meta = require('../../meta'),
-	accountHelpers = require('./helpers'),
-	helpers = require('../helpers');
+var user = require('../../user');
+var posts = require('../../posts');
+var plugins = require('../../plugins');
+var meta = require('../../meta');
+var accountHelpers = require('./helpers');
+var helpers = require('../helpers');
 
 
 var profileController = {};
@@ -36,8 +36,10 @@ profileController.get = function(req, res, callback) {
 			}
 			userData = _userData;
 
-			if (req.uid !== parseInt(userData.uid, 10)) {
+			req.session.uids_viewed = req.session.uids_viewed || {};
+			if (req.uid !== parseInt(userData.uid, 10) && (!req.session.uids_viewed[userData.uid] || req.session.uids_viewed[userData.uid] < Date.now() - 3600000)) {
 				user.incrementUserFieldBy(userData.uid, 'profileviews', 1);
+				req.session.uids_viewed[userData.uid] = Date.now();
 			}
 
 			async.parallel({
@@ -52,7 +54,7 @@ profileController.get = function(req, res, callback) {
 				},
 				aboutme: function(next) {
 					if (userData.aboutme) {
-						plugins.fireHook('filter:parse.raw', userData.aboutme, next);
+						plugins.fireHook('filter:parse.aboutme', userData.aboutme, next);
 					} else {
 						next();
 					}
@@ -116,6 +118,9 @@ profileController.get = function(req, res, callback) {
 					}
 				);
 			}
+			userData.selectedGroup = userData.groups.find(function(group) {
+				return group && group.name === userData.groupTitle;
+			});
 
 			plugins.fireHook('filter:user.account', {userData: userData, uid: req.uid}, next);
 		}

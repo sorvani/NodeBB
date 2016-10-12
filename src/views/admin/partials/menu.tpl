@@ -7,6 +7,7 @@
 			<li><a href="{relative_path}/admin/general/navigation">Navigation</a></li>
 			<li><a href="{relative_path}/admin/general/languages">Languages</a></li>
 			<li><a href="{relative_path}/admin/general/sounds">Sounds</a></li>
+			<li><a href="{relative_path}/admin/general/social">Social</a></li>
 		</ul>
 	</section>
 
@@ -19,6 +20,7 @@
 			<li><a href="{relative_path}/admin/manage/registration">Registration Queue</a></li>
 			<li><a href="{relative_path}/admin/manage/groups">Groups</a></li>
 			<li><a href="{relative_path}/admin/manage/flags">Flags</a></li>
+			<li><a href="{relative_path}/admin/manage/ip-blacklist">IP Blacklist</a></li>
 		</ul>
 	</section>
 
@@ -31,6 +33,7 @@
 			<li><a href="{relative_path}/admin/settings/user">User</a></li>
 			<li><a href="{relative_path}/admin/settings/group">Group</a></li>
 			<li><a href="{relative_path}/admin/settings/guest">Guests</a></li>
+			<li><a href="{relative_path}/admin/settings/uploads">Uploads</a></li>
 			<li><a href="{relative_path}/admin/settings/post">Post</a></li>
 			<li><a href="{relative_path}/admin/settings/chat">Chat</a></li>
 			<li><a href="{relative_path}/admin/settings/pagination">Pagination</a></li>
@@ -92,7 +95,8 @@
 			<li><a href="{relative_path}/admin/advanced/database">Database</a></li>
 			<li><a href="{relative_path}/admin/advanced/events">Events</a></li>
 			<li><a href="{relative_path}/admin/advanced/logs">Logs</a></li>
-			<li><a href="{relative_path}/admin/advanced/post-cache">Post Cache</a></li>
+			<li><a href="{relative_path}/admin/advanced/errors">Errors</a></li>
+			<li><a href="{relative_path}/admin/advanced/cache">Cache</a></li>
 			<!-- IF env -->
 			<li><a href="{relative_path}/admin/development/logger">Logger</a></li>
 			<!-- ENDIF env -->
@@ -103,31 +107,20 @@
 <main id="panel">
 	<nav class="header" id="header">
 		<div class="pull-left">
-			<button id="mobile-menu">
+			<div id="mobile-menu">
 				<div class="bar"></div>
 				<div class="bar"></div>
 				<div class="bar"></div>
-			</button>
+			</div>
 			<h1 id="main-page-title"></h1>
 		</div>
 
 		<ul id="user_label" class="pull-right">
 			<li class="dropdown pull-right">
 				<a class="dropdown-toggle" data-toggle="dropdown" href="#" id="user_dropdown">
-					<i class="fa fa-ellipsis-v"></i>
+					<i class="fa fa-fw fa-ellipsis-v"></i>
 				</a>
 				<ul id="user-control-list" class="dropdown-menu" aria-labelledby="user_dropdown">
-					<li>
-						<a href="{relative_path}/" target="_blank" title="View Forum">
-							View Forum
-						</a>
-					</li>
-					<li role="presentation" class="divider"></li>
-					<li>
-						<a href="#" class="reload" title="Reload Forum">
-							Reload Forum
-						</a>
-					</li>
 					<li>
 						<a href="#" class="restart" title="Restart Forum">
 							Restart Forum
@@ -139,6 +132,13 @@
 					</li>
 				</ul>
 			</li>
+
+			<li class="pull-right">
+				<a href="{config.relative_path}/">
+					<i class="fa fa-fw fa-home" title="View Forum"></i>
+				</a>
+			</li>
+
 			<form class="pull-right hidden-sm hidden-xs" role="search">
 				<div class="" id="acp-search" >
 					<div class="dropdown">
@@ -159,6 +159,7 @@
 					<li><a href="{relative_path}/admin/general/navigation">Navigation</a></li>
 					<li><a href="{relative_path}/admin/general/languages">Languages</a></li>
 					<li><a href="{relative_path}/admin/general/sounds">Sounds</a></li>
+					<li><a href="{relative_path}/admin/general/social">Social</a></li>
 				</ul>
 			</li>
 			<li class="dropdown menu-item">
@@ -170,6 +171,7 @@
 					<li><a href="{relative_path}/admin/manage/registration">Registration Queue</a></li>
 					<li><a href="{relative_path}/admin/manage/groups">Groups</a></li>
 					<li><a href="{relative_path}/admin/manage/flags">Flags</a></li>
+					<li><a href="{relative_path}/admin/manage/ip-blacklist">IP Blacklist</a></li>
 				</ul>
 			</li>
 			<li class="dropdown menu-item">
@@ -181,6 +183,7 @@
 					<li><a href="{relative_path}/admin/settings/user">User</a></li>
 					<li><a href="{relative_path}/admin/settings/group">Group</a></li>
 					<li><a href="{relative_path}/admin/settings/guest">Guests</a></li>
+					<li><a href="{relative_path}/admin/settings/uploads">Uploads</a></li>
 					<li><a href="{relative_path}/admin/settings/post">Post</a></li>
 					<li><a href="{relative_path}/admin/settings/chat">Chat</a></li>
 					<li><a href="{relative_path}/admin/settings/pagination">Pagination</a></li>
@@ -241,11 +244,20 @@
 					<li><a href="{relative_path}/admin/advanced/database">Database</a></li>
 					<li><a href="{relative_path}/admin/advanced/events">Events</a></li>
 					<li><a href="{relative_path}/admin/advanced/logs">Logs</a></li>
-					<li><a href="{relative_path}/admin/advanced/post-cache">Post Cache</a></li>
+					<li><a href="{relative_path}/admin/advanced/errors">Errors</a></li>
+					<li><a href="{relative_path}/admin/advanced/cache">Cache</a></li>
 					<!-- IF env -->
 					<li><a href="{relative_path}/admin/development/logger">Logger</a></li>
 					<!-- ENDIF env -->
 				</ul>
+			</li>
+		</ul>
+
+		<ul class="nav navbar-nav navbar-right hidden-xs reconnect-spinner">
+			<li>
+				<a href="#" id="reconnect" class="hide" title="Connection to {title} has been lost, attempting to reconnect...">
+					<i class="fa fa-check"></i>
+				</a>
 			</li>
 		</ul>
 	</nav>

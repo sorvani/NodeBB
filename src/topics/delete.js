@@ -1,17 +1,17 @@
 'use strict';
 
-var async = require('async'),
-	db = require('../database'),
+var async = require('async');
+var db = require('../database');
 
-	user = require('../user'),
-	posts = require('../posts'),
-	plugins = require('../plugins'),
-	batch = require('../batch');
+var user = require('../user');
+var posts = require('../posts');
+var plugins = require('../plugins');
+var batch = require('../batch');
 
 
 module.exports = function(Topics) {
 
-	Topics.delete = function(tid, callback) {
+	Topics.delete = function(tid, uid, callback) {
 		Topics.getTopicFields(tid, ['cid'], function(err, topicData) {
 			if (err) {
 				return callback(err);
@@ -32,13 +32,13 @@ module.exports = function(Topics) {
 						db.sortedSetRemove('cid:' + topicData.cid + ':pids', pids, next);
 					});
 				}
-			], function(err, results) {
+			], function(err) {
 				callback(err);
 			});
 		});
 	};
 
-	Topics.restore = function(tid, callback) {
+	Topics.restore = function(tid, uid, callback) {
 		Topics.getTopicFields(tid, ['cid', 'lastposttime', 'postcount', 'viewcount'], function(err, topicData) {
 			if (err) {
 				return callback(err);
@@ -79,13 +79,13 @@ module.exports = function(Topics) {
 						});
 					});
 				}
-			], function(err, results) {
+			], function(err) {
 				callback(err);
 			});
 		});
 	};
 
-	Topics.purgePostsAndTopic = function(tid, callback) {
+	Topics.purgePostsAndTopic = function(tid, uid, callback) {
 		var mainPid;
 		async.waterfall([
 			function (next) {
@@ -94,39 +94,50 @@ module.exports = function(Topics) {
 			function (_mainPid, next) {
 				mainPid = _mainPid;
 				batch.processSortedSet('tid:' + tid + ':posts', function(pids, next) {
-					async.eachLimit(pids, 10, posts.purge, next);
+					async.eachLimit(pids, 10, function(pid, next) {
+						posts.purge(pid, uid, next);
+					}, next);
 				}, {alwaysStartAt: 0}, next);
 			},
 			function (next) {
-				posts.purge(mainPid, next);
+				posts.purge(mainPid, uid, next);
 			},
 			function (next) {
-				Topics.purge(tid, next);
+				Topics.purge(tid, uid, next);
 			}
 		], callback);
 	};
 
-	Topics.purge = function(tid, callback) {
-		async.parallel([
+	Topics.purge = function(tid, uid, callback) {
+		async.waterfall([
 			function(next) {
-				db.deleteAll([
-					'tid:' + tid + ':followers',
-					'tid:' + tid + ':posts',
-					'tid:' + tid + ':posts:votes',
-					'tid:' + tid + ':bookmarks'
+				deleteFromFollowersIgnorers(tid, next);
+			},
+			function(next) {
+				async.parallel([
+					function(next) {
+						db.deleteAll([
+							'tid:' + tid + ':followers',
+							'tid:' + tid + ':ignorers',
+							'tid:' + tid + ':posts',
+							'tid:' + tid + ':posts:votes',
+							'tid:' + tid + ':bookmarks',
+							'tid:' + tid + ':posters'
+						], next);
+					},
+					function(next) {
+						db.sortedSetsRemove(['topics:tid', 'topics:recent', 'topics:posts', 'topics:views'], tid, next);
+					},
+					function(next) {
+						deleteTopicFromCategoryAndUser(tid, next);
+					},
+					function(next) {
+						Topics.deleteTopicTags(tid, next);
+					},
+					function(next) {
+						reduceCounters(tid, next);
+					}
 				], next);
-			},
-			function(next) {
-				db.sortedSetsRemove(['topics:tid', 'topics:recent', 'topics:posts', 'topics:views'], tid, next);
-			},
-			function(next) {
-				deleteTopicFromCategoryAndUser(tid, next);
-			},
-			function(next) {
-				Topics.deleteTopicTags(tid, next);
-			},
-			function(next) {
-				reduceCounters(tid, next);
 			}
 		], function(err) {
 			if (err) {
@@ -136,6 +147,26 @@ module.exports = function(Topics) {
 			db.delete('topic:' + tid, callback);
 		});
 	};
+
+	function deleteFromFollowersIgnorers(tid, callback) {
+		async.waterfall([
+			function(next) {
+				async.parallel({
+					followers: async.apply(db.getSetMembers, 'tid:' + tid + ':followers'),
+					ignorers: async.apply(db.getSetMembers, 'tid:' + tid + ':ignorers')
+				}, next);
+			},
+			function(results, next) {
+				var followerKeys = results.followers.map(function(uid) {
+					return 'uid:' + uid + ':followed_tids';
+				});
+				var ignorerKeys = results.ignorers.map(function(uid) {
+					return 'uid:' + uid + 'ignored_tids';
+				});
+				db.sortedSetsRemove(followerKeys.concat(ignorerKeys), tid, next);
+			}
+		], callback);
+	}
 
 	function deleteTopicFromCategoryAndUser(tid, callback) {
 		Topics.getTopicFields(tid, ['cid', 'uid'], function(err, topicData) {

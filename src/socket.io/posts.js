@@ -1,23 +1,24 @@
 "use strict";
 
-var	async = require('async'),
+var	async = require('async');
 
-	posts = require('../posts'),
-	privileges = require('../privileges'),
-	meta = require('../meta'),
-	topics = require('../topics'),
-	user = require('../user'),
-	websockets = require('./index'),
-	socketTopics = require('./topics'),
-	socketHelpers = require('./helpers'),
-	utils = require('../../public/src/utils'),
+var posts = require('../posts');
+var privileges = require('../privileges');
+var meta = require('../meta');
+var topics = require('../topics');
+var user = require('../user');
+var websockets = require('./index');
+var socketHelpers = require('./helpers');
+var utils = require('../../public/src/utils');
 
-	SocketPosts = {};
+var apiController = require('../controllers/api');
 
+var SocketPosts = {};
 
 require('./posts/edit')(SocketPosts);
 require('./posts/move')(SocketPosts);
-require('./posts/favourites')(SocketPosts);
+require('./posts/votes')(SocketPosts);
+require('./posts/bookmarks')(SocketPosts);
 require('./posts/tools')(SocketPosts);
 require('./posts/flag')(SocketPosts);
 
@@ -28,6 +29,7 @@ SocketPosts.reply = function(socket, data, callback) {
 
 	data.uid = socket.uid;
 	data.req = websockets.reqFromSocket(socket);
+	data.timestamp = Date.now();
 
 	topics.reply(data, function(err, postData) {
 		if (err) {
@@ -36,9 +38,6 @@ SocketPosts.reply = function(socket, data, callback) {
 
 		var result = {
 			posts: [postData],
-			privileges: {
-				'topics:reply': true
-			},
 			'reputation:disabled': parseInt(meta.config['reputation:disabled'], 10) === 1,
 			'downvote:disabled': parseInt(meta.config['downvote:disabled'], 10) === 1,
 		};
@@ -49,11 +48,7 @@ SocketPosts.reply = function(socket, data, callback) {
 
 		user.updateOnlineUsers(socket.uid);
 
-		socketHelpers.notifyOnlineUsers(socket.uid, result);
-
-		if (data.lock) {
-			socketTopics.doTopicAction('lock', 'event:topic_locked', socket, {tids: [postData.topic.tid], cid: postData.topic.cid});
-		}
+		socketHelpers.notifyNew(socket.uid, 'newPost', result);
 	});
 };
 
@@ -77,12 +72,28 @@ SocketPosts.getRawPost = function(socket, pid, callback) {
 	], callback);
 };
 
-SocketPosts.loadMoreFavourites = function(socket, data, callback) {
-	loadMorePosts('uid:' + data.uid + ':favourites', socket.uid, data, callback);
+SocketPosts.getPost = function(socket, pid, callback) {
+	apiController.getPostData(pid, socket.uid, callback);
+};
+
+SocketPosts.loadMoreBookmarks = function(socket, data, callback) {
+	loadMorePosts('uid:' + data.uid + ':bookmarks', socket.uid, data, callback);
 };
 
 SocketPosts.loadMoreUserPosts = function(socket, data, callback) {
 	loadMorePosts('uid:' + data.uid + ':posts', socket.uid, data, callback);
+};
+
+SocketPosts.loadMoreBestPosts = function(socket, data, callback) {
+	loadMorePosts('uid:' + data.uid + ':posts:votes', socket.uid, data, callback);
+};
+
+SocketPosts.loadMoreUpVotedPosts = function(socket, data, callback) {
+	loadMorePosts('uid:' + data.uid + ':upvote', socket.uid, data, callback);
+};
+
+SocketPosts.loadMoreDownVotedPosts = function(socket, data, callback) {
+	loadMorePosts('uid:' + data.uid + ':downvote', socket.uid, data, callback);
 };
 
 function loadMorePosts(set, uid, data, callback) {
@@ -90,8 +101,8 @@ function loadMorePosts(set, uid, data, callback) {
 		return callback(new Error('[[error:invalid-data]]'));
 	}
 
-	var start = Math.max(0, parseInt(data.after, 10)),
-		stop = start + 9;
+	var start = Math.max(0, parseInt(data.after, 10));
+	var stop = start + 9;
 
 	posts.getPostSummariesFromSet(set, uid, start, stop, callback);
 }
@@ -106,5 +117,7 @@ SocketPosts.getPidIndex = function(socket, data, callback) {
 	}
 	posts.getPidIndex(data.pid, data.tid, data.topicPostSort, callback);
 };
+
+
 
 module.exports = SocketPosts;

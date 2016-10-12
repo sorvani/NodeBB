@@ -1,17 +1,16 @@
 "use strict";
 
-var async = require('async'),
+var async = require('async');
 
-	db = require('../../database'),
-	groups = require('../../groups'),
-	user = require('../../user'),
-	categories = require('../../categories'),
-	privileges = require('../../privileges'),
-	plugins = require('../../plugins'),
-	Categories = {};
+var db = require('../../database');
+var groups = require('../../groups');
+var categories = require('../../categories');
+var privileges = require('../../privileges');
+var plugins = require('../../plugins');
+var Categories = {};
 
 Categories.create = function(socket, data, callback) {
-	if(!data) {
+	if (!data) {
 		return callback(new Error('[[error:invalid-data]]'));
 	}
 
@@ -43,11 +42,11 @@ Categories.getNames = function(socket, data, callback) {
 };
 
 Categories.purge = function(socket, cid, callback) {
-	categories.purge(cid, callback);
+	categories.purge(cid, socket.uid, callback);
 };
 
 Categories.update = function(socket, data, callback) {
-	if(!data) {
+	if (!data) {
 		return callback(new Error('[[error:invalid-data]]'));
 	}
 
@@ -55,7 +54,7 @@ Categories.update = function(socket, data, callback) {
 };
 
 Categories.setPrivilege = function(socket, data, callback) {
-	if(!data) {
+	if (!data) {
 		return callback(new Error('[[error:invalid-data]]'));
 	}
 
@@ -70,6 +69,38 @@ Categories.setPrivilege = function(socket, data, callback) {
 
 Categories.getPrivilegeSettings = function(socket, cid, callback) {
 	privileges.categories.list(cid, callback);
+};
+
+Categories.copyPrivilegesToChildren = function(socket, cid, callback) {
+	categories.getCategories([cid], socket.uid, function(err, categories) {
+		if (err) {
+			return callback(err);
+		}
+		var category = categories[0];
+
+		async.eachSeries(category.children, function(child, next) {
+			copyPrivilegesToChildrenRecursive(cid, child, next);
+		}, callback);
+	});
+};
+
+function copyPrivilegesToChildrenRecursive(parentCid, category, callback) {
+	categories.copyPrivilegesFrom(parentCid, category.cid, function(err) {
+		if (err) {
+			return callback(err);
+		}
+		async.eachSeries(category.children, function(child, next) {
+			copyPrivilegesToChildrenRecursive(parentCid, child, next);
+		}, callback);
+	});
+}
+
+Categories.copySettingsFrom = function(socket, data, callback) {
+	categories.copySettingsFrom(data.fromCid, data.toCid, true, callback);
+};
+
+Categories.copyPrivilegesFrom = function(socket, data, callback) {
+	categories.copyPrivilegesFrom(data.fromCid, data.toCid, callback);
 };
 
 module.exports = Categories;

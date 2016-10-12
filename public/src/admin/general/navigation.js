@@ -1,7 +1,7 @@
 "use strict";
 /* global define, app, ajaxify, socket, templates */
 
-define('admin/general/navigation', ['translator', 'iconSelect'], function(translator, iconSelect) {
+define('admin/general/navigation', ['translator', 'iconSelect', 'jqueryui'], function(translator, iconSelect, jqueryui) {
 	var navigation = {},
 		available;
 
@@ -21,7 +21,7 @@ define('admin/general/navigation', ['translator', 'iconSelect'], function(transl
 					stop: drop
 				});
 		});
-
+		
 		$('#active-navigation').sortable().droppable({
 			accept: $('#available li .drag-item')
 		});
@@ -33,6 +33,7 @@ define('admin/general/navigation', ['translator', 'iconSelect'], function(transl
 				var index = iconEl.parents('[data-index]').attr('data-index');
 				$('#active-navigation [data-index="' + index + '"] i').attr('class', 'fa fa-fw ' + newIconClass);
 				iconEl.siblings('[name="iconClass"]').val(newIconClass);
+				iconEl.siblings('.change-icon-link').toggleClass('hidden', !!newIconClass);
 			});
 		});
 
@@ -65,7 +66,7 @@ define('admin/general/navigation', ['translator', 'iconSelect'], function(transl
 			data = id === 'custom' ? {iconClass: 'fa-navicon'} : available[id];
 
 		data.enabled = false;
-		data.index = parseInt($('#enabled').children().last().attr('data-index'), 10) + 1;
+		data.index = (parseInt($('#enabled').children().last().attr('data-index'), 10) || 0) + 1;
 
 		templates.parse('admin/general/navigation', 'navigation', {navigation: [data]}, function(li) {
 			li = $(translator.unescape(li));
@@ -131,7 +132,7 @@ define('admin/general/navigation', ['translator', 'iconSelect'], function(transl
 
 	function toggle() {
 		var btn = $(this),
-			disabled = btn.html() === 'Enable';
+			disabled = btn.hasClass('btn-success');
 
 		btn.toggleClass('btn-warning').toggleClass('btn-success').html(!disabled ? 'Enable' : 'Disable');
 		btn.parents('li').find('[name="enabled"]').val(!disabled ? '' : 'on');

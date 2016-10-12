@@ -31,7 +31,7 @@ define('forum/topic', [
 			$(window).off('keydown', onKeyDown);
 		}
 
-		if (!data.url.startsWith('topic/')) {
+		if (data.url && !data.url.startsWith('topic/')) {
 			require(['search'], function(search) {
 				if (search.topicDOM.active) {
 					search.topicDOM.end();
@@ -55,23 +55,25 @@ define('forum/topic', [
 
 		sort.handleSort('topicPostSort', 'user.setTopicSort', 'topic/' + ajaxify.data.slug);
 
-		enableInfiniteLoadingOrPagination();
+		if (!config.usePagination) {
+			infinitescroll.init($('[component="topic"]'), posts.loadMorePosts);
+		}
 
 		addBlockQuoteHandler();
 
 		addParentHandler();
 
-		handleBookmark(tid);
-
 		handleKeys();
 
-		navigator.init('[component="post/anchor"]', ajaxify.data.postcount, Topic.toTop, Topic.toBottom, Topic.navigatorCallback, Topic.calculateIndex);
+		navigator.init('[component="post"]', ajaxify.data.postcount, Topic.toTop, Topic.toBottom, Topic.navigatorCallback, Topic.calculateIndex);
+
+		handleBookmark(tid);
 
 		$(window).on('scroll', updateTopicTitle);
 
 		handleTopicSearch();
 
-		$(window).trigger('action:topic.loaded');
+		$(window).trigger('action:topic.loaded', ajaxify.data);
 	};
 
 	function handleKeys() {
@@ -82,6 +84,9 @@ define('forum/topic', [
 
 	function onKeyDown(ev) {
 		if (ev.target.nodeName === 'BODY') {
+			if (ev.shiftKey || ev.ctrlKey || ev.altKey) {
+				return;
+			}
 			if (ev.which === 36) { // home key
 				Topic.toTop();
 				return false;
@@ -93,7 +98,7 @@ define('forum/topic', [
 	}
 
 	function handleTopicSearch() {
-		require(['search', 'mousetrap'], function(search, Mousetrap) {
+		require(['search', 'mousetrap'], function(search, mousetrap) {
 			$('.topic-search')
 				.on('click', '.prev', function() {
 					search.topicDOM.prev();
@@ -102,7 +107,7 @@ define('forum/topic', [
 					search.topicDOM.next();
 				});
 
-			Mousetrap.bind('ctrl+f', function(e) {
+			mousetrap.bind('ctrl+f', function(e) {
 				if (config.topicSearchEnabled) {
 					// If in topic, open search window and populate, otherwise regular behaviour
 					var match = ajaxify.currentPage.match(/^topic\/([\d]+)/),
@@ -124,6 +129,9 @@ define('forum/topic', [
 
 	Topic.toBottom = function() {
 		socket.emit('topics.postcount', ajaxify.data.tid, function(err, postCount) {
+			if (err) {
+				return app.alertError(err.message);
+			}
 			if (config.topicPostSort !== 'oldest_to_newest') {
 				postCount = 2;
 			}
@@ -138,9 +146,10 @@ define('forum/topic', [
 
 		if (postIndex && window.location.search.indexOf('page=') === -1) {
 			if (components.get('post/anchor', postIndex).length) {
-				return navigator.scrollToPostIndex(postIndex, true);
+				return navigator.scrollToPostIndex(postIndex, true, 0);
 			}
-		} else if (bookmark && (!config.usePagination || (config.usePagination && ajaxify.data.pagination.currentPage === 1)) && ajaxify.data.postcount > 5) {
+		} else if (bookmark && (!config.usePagination || (config.usePagination && ajaxify.data.pagination.currentPage === 1)) && ajaxify.data.postcount > ajaxify.data.bookmarkThreshold) {
+			navigator.update(0);
 			app.alert({
 				alert_id: 'bookmark',
 				message: '[[topic:bookmark_instructions]]',
@@ -156,6 +165,8 @@ define('forum/topic', [
 			setTimeout(function() {
 				app.removeAlert('bookmark');
 			}, 10000);
+		} else {
+			navigator.update(0);
 		}
 	}
 
@@ -186,41 +197,28 @@ define('forum/topic', [
 	}
 
 	function addParentHandler() {
-		components.get('topic').on('click', '[component="post/parent"]', function() {
+		components.get('topic').on('click', '[component="post/parent"]', function(e) {
 			var toPid = $(this).attr('data-topid');
 
 			var toPost = $('[component="post"][data-pid="' + toPid + '"]');
 			if (toPost.length) {
-				return navigator.scrollToPost(toPost.attr('data-index'), true);
+				e.preventDefault();
+				navigator.scrollToPost(toPost.attr('data-index'), true);
+				return false;
 			}
-
-			socket.emit('posts.getPidIndex', {pid: toPid, tid: ajaxify.data.tid, topicPostSort: config.topicPostSort}, function(err, index) {
-				if (err) {
-					return app.alertError(err.message);
-				}
-
-				if (utils.isNumber(index)) {
-					navigator.scrollToPost(index, true);
-				}
-			});
 		});
 	}
 
-	function enableInfiniteLoadingOrPagination() {
-		if (!config.usePagination) {
-			infinitescroll.init($('[component="topic"]'), posts.loadMorePosts);
-		} else {
-			navigator.disable();
-		}
-	}
-
 	function updateTopicTitle() {
-		if ($(window).scrollTop() > 50) {
-			components.get('navbar/title').find('span').text(ajaxify.data.title).show();
-		} else {
-			components.get('navbar/title').find('span').text('').hide();
+		var span = components.get('navbar/title').find('span');
+		if ($(window).scrollTop() > 50 && span.hasClass('hidden')) {
+			span.html(ajaxify.data.title).removeClass('hidden');
+		} else if ($(window).scrollTop() <= 50 && !span.hasClass('hidden')) {
+			span.html('').addClass('hidden');
 		}
-		app.removeAlert('bookmark');
+		if ($(window).scrollTop() > 300) {
+			app.removeAlert('bookmark');
+		}
 	}
 
 	Topic.calculateIndex = function(index, elementCount) {
@@ -230,40 +228,47 @@ define('forum/topic', [
 		return index;
 	};
 
-	Topic.navigatorCallback = function(index, elementCount) {
+	Topic.navigatorCallback = function(index, elementCount, threshold) {
 		var path = ajaxify.removeRelativePath(window.location.pathname.slice(1));
 		if (!path.startsWith('topic')) {
-			return 1;
+			return;
 		}
 
-		if (!navigator.scrollActive) {
-			var parts = ajaxify.removeRelativePath(window.location.pathname.slice(1)).split('/');
-			var topicId = parts[1],
-				slug = parts[2];
-			var newUrl = 'topic/' + topicId + '/' + (slug ? slug : '');
-			if (index > 1) {
-				newUrl += '/' + index;
+		if (navigator.scrollActive) {
+			return;
+		}
+
+		posts.loadImages(threshold);
+
+		var newUrl = 'topic/' + ajaxify.data.slug + (index > 1 ? ('/' + index) : '');
+
+		if (newUrl !== currentUrl) {
+
+			if (Topic.replaceURLTimeout) {
+				clearTimeout(Topic.replaceURLTimeout);
 			}
 
-			if (newUrl !== currentUrl) {
-				if (Topic.replaceURLTimeout) {
-					clearTimeout(Topic.replaceURLTimeout);
+			Topic.replaceURLTimeout = setTimeout(function() {
+
+				if (index >= elementCount && app.user.uid) {
+					socket.emit('topics.markAsRead', [ajaxify.data.tid]);
 				}
 
-				Topic.replaceURLTimeout = setTimeout(function() {
+				updateUserBookmark(index);
 
-					updateUserBookmark(index);
-
-					Topic.replaceURLTimeout = 0;
-					if (history.replaceState) {
-						var search = (window.location.search ? window.location.search : '');
-						history.replaceState({
-							url: newUrl + search
-						}, null, window.location.protocol + '//' + window.location.host + RELATIVE_PATH + '/' + newUrl + search);
+				Topic.replaceURLTimeout = 0;
+				if (history.replaceState) {
+					var search = window.location.search || '';
+					if (!config.usePagination) {
+						search = (search && !/^\?page=\d+$/.test(search) ? search : '');
 					}
-					currentUrl = newUrl;
-				}, 500);
-			}
+
+					history.replaceState({
+						url: newUrl + search
+					}, null, window.location.protocol + '//' + window.location.host + RELATIVE_PATH + '/' + newUrl + search);
+				}
+				currentUrl = newUrl;
+			}, 500);
 		}
 	};
 
@@ -271,7 +276,7 @@ define('forum/topic', [
 		var bookmarkKey = 'topic:' + ajaxify.data.tid + ':bookmark';
 		var currentBookmark = ajaxify.data.bookmark || localStorage.getItem(bookmarkKey);
 
-		if (ajaxify.data.postcount > 5 && (!currentBookmark || parseInt(index, 10) > parseInt(currentBookmark, 10))) {
+		if (ajaxify.data.postcount > ajaxify.data.bookmarkThreshold && (!currentBookmark || parseInt(index, 10) > parseInt(currentBookmark, 10))) {
 			if (app.user.uid) {
 				socket.emit('topics.bookmark', {
 					'tid': ajaxify.data.tid,

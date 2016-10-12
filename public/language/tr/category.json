@@ -10,7 +10,11 @@
     "share_this_category": "Bu kategoriyi paylaş",
     "watch": "İzle",
     "ignore": "Yoksay",
-    "watch.message": "Şuan bu kategorideki güncellemeleri izliyorsunuz",
-    "ignore.message": "Şuan bu kategoriden güncellemeleri gizliyorsunuz",
+    "watching": "İzleniyor",
+    "ignoring": "Yoksayılıyor",
+    "watching.description": "Okunmamış başlıkları göster",
+    "ignoring.description": "Okunmamış başlıkları gösterme",
+    "watch.message": "You are now watching updates from this category and all subcategories",
+    "ignore.message": "You are now ignoring updates from this category and all subcategories",
     "watched-categories": "Takip edilen kategoriler"
 }

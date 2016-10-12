@@ -1,5 +1,5 @@
 "use strict";
-/*global define, app, socket, ajaxify, RELATIVE_PATH, bootbox, templates */
+/*global config, define, app, socket, ajaxify, bootbox, templates */
 
 define('admin/manage/category', [
 	'uploader',
@@ -18,6 +18,9 @@ define('admin/manage/category', [
 			if (cid) {
 				modified_categories[cid] = modified_categories[cid] || {};
 				modified_categories[cid][$(el).attr('data-name')] = $(el).val();
+
+				app.flags = app.flags || {};
+				app.flags._unsaved = true;
 			}
 		}
 
@@ -31,6 +34,7 @@ define('admin/manage/category', [
 					}
 
 					if (result && result.length) {
+						app.flags._unsaved = false;
 						app.alert({
 							title: 'Updated Categories',
 							message: 'Category IDs ' + result.join(', ') + ' was successfully updated.',
@@ -75,7 +79,7 @@ define('admin/manage/category', [
 				}
 			});
 
-		$('[data-name="imageClass"]').on('change', function(ev) {
+		$('[data-name="imageClass"]').on('change', function() {
 			$('.category-preview').css('background-size', $(this).val());
 		});
 
@@ -99,23 +103,45 @@ define('admin/manage/category', [
 			});
 		});
 
-		$('.upload-button').on('click', function() {
-			var inputEl = $(this),
-				cid = inputEl.attr('data-cid');
+		$('.copy-settings').on('click', function() {
+			selectCategoryModal(function(cid) {
+				socket.emit('admin.categories.copySettingsFrom', {fromCid: cid, toCid: ajaxify.data.category.cid}, function(err) {
+					if (err) {
+						return app.alertError(err.message);
+					}
+					app.alertSuccess('Settings Copied!');
+					ajaxify.refresh();
+				});
+			});
+			return false;
+		});
 
-			uploader.open(RELATIVE_PATH + '/api/admin/category/uploadpicture', { cid: cid }, 0, function(imageUrlOnServer) {
-				inputEl.val(imageUrlOnServer);
+		$('.upload-button').on('click', function() {
+			var inputEl = $(this);
+			var cid = inputEl.attr('data-cid');
+
+			uploader.show({
+				title: 'Upload category image',
+				route: config.relative_path + '/api/admin/category/uploadpicture',
+				params: {cid: cid}
+			}, function(imageUrlOnServer) {
+				$('#category-image').val(imageUrlOnServer);
 				var previewBox = inputEl.parent().parent().siblings('.category-preview');
 				previewBox.css('background', 'url(' + imageUrlOnServer + '?' + new Date().getTime() + ')');
-				modified(inputEl[0]);
+
+				modified($('#category-image'));
 			});
+		});
+
+		$('#category-image').on('change', function() {
+			$('.category-preview').css('background-image', $(this).val() ? ('url("' + $(this).val() + '")') : '');
 		});
 
 		$('.delete-image').on('click', function(e) {
 			e.preventDefault();
 
-			var inputEl = $('.upload-button'),
-				previewBox = inputEl.parent().parent().siblings('.category-preview');
+			var inputEl = $('#category-image');
+			var previewBox = $('.category-preview');
 
 			inputEl.val('');
 			previewBox.css('background-image', '');
@@ -123,7 +149,7 @@ define('admin/manage/category', [
 			$(this).parent().addClass('hide').hide();
 		});
 
-		$('.category-preview').on('click', function(ev) {
+		$('.category-preview').on('click', function() {
 			iconSelect.init($(this).find('i'), modified);
 		});
 
@@ -176,6 +202,8 @@ define('admin/manage/category', [
 
 		$('.privilege-table-container').on('click', '[data-action="search.user"]', Category.addUserToPrivilegeTable);
 		$('.privilege-table-container').on('click', '[data-action="search.group"]', Category.addGroupToPrivilegeTable);
+		$('.privilege-table-container').on('click', '[data-action="copyToChildren"]', Category.copyPrivilegesToChildren);
+		$('.privilege-table-container').on('click', '[data-action="copyPrivilegesFrom"]', Category.copyPrivilegesFromCategory);
 
 		Category.exposeAssumedPrivileges();
 	};
@@ -292,7 +320,7 @@ define('admin/manage/category', [
 			autocomplete.user(inputEl, function(ev, ui) {
 				socket.emit('admin.categories.setPrivilege', {
 					cid: ajaxify.data.category.cid,
-					privilege: ['find', 'read'],
+					privilege: ['find', 'read', 'topics:read'],
 					set: true,
 					member: ui.item.user.uid
 				}, function(err) {
@@ -320,7 +348,7 @@ define('admin/manage/category', [
 			autocomplete.group(inputEl, function(ev, ui) {
 				socket.emit('admin.categories.setPrivilege', {
 					cid: ajaxify.data.category.cid,
-					privilege: ['groups:find', 'groups:read'],
+					privilege: ['groups:find', 'groups:read', 'groups:topics:read'],
 					set: true,
 					member: ui.item.group.name
 				}, function(err) {
@@ -334,6 +362,60 @@ define('admin/manage/category', [
 			});
 		});
 	};
+
+	Category.copyPrivilegesToChildren = function() {
+		socket.emit('admin.categories.copyPrivilegesToChildren', ajaxify.data.category.cid, function(err) {
+			if (err) {
+				return app.alertError(err.message);
+			}
+			app.alertSuccess('Privileges copied!');
+		});
+	};
+
+	Category.copyPrivilegesFromCategory = function() {
+		selectCategoryModal(function(cid) {
+			socket.emit('admin.categories.copyPrivilegesFrom', {toCid: ajaxify.data.category.cid, fromCid: cid}, function(err) {
+				if (err) {
+					return app.alertError(err.message);
+				}
+				ajaxify.refresh();
+			});
+		});
+	};
+
+	function selectCategoryModal(callback) {
+		socket.emit('admin.categories.getNames', function(err, categories) {
+			if (err) {
+				return app.alertError(err.message);
+			}
+
+			templates.parse('admin/partials/categories/select-category', {
+				categories: categories
+			}, function(html) {
+				function submit() {
+					var formData = modal.find('form').serializeObject();
+					callback(formData['select-cid']);
+					modal.modal('hide');
+					return false;
+				}
+
+				var modal = bootbox.dialog({
+					title: 'Select a Category',
+					message: html,
+					buttons: {
+						save: {
+							label: 'Copy',
+							className: 'btn-primary',
+							callback: submit
+						}
+					}
+				});
+
+				modal.find('form').on('submit', submit);
+			});
+		});
+	}
+
 
 	return Category;
 });

@@ -1,17 +1,16 @@
 "use strict";
 
-var	async = require('async'),
-	winston = require('winston'),
-	nconf = require('nconf'),
+var	async = require('async');
+var winston = require('winston');
+var nconf = require('nconf');
 
-	db = require('../database'),
-	meta = require('../meta'),
-	user = require('../user'),
-	topics = require('../topics'),
-	batch = require('../batch'),
-	plugins = require('../plugins'),
-	emailer = require('../emailer'),
-	utils = require('../../public/src/utils');
+var db = require('../database');
+var meta = require('../meta');
+var user = require('../user');
+var topics = require('../topics');
+var plugins = require('../plugins');
+var emailer = require('../emailer');
+var utils = require('../../public/src/utils');
 
 (function(Digest) {
 	Digest.execute = function(interval) {
@@ -61,6 +60,10 @@ var	async = require('async'),
 
 	Digest.getSubscribers = function(interval, callback) {
 		db.getSortedSetRange('digest:' + interval + ':uids', 0, -1, function(err, subscribers) {
+			if (err) {
+				return callback(err);
+			}
+
 			plugins.fireHook('filter:digest.subscribers', {
 				interval: interval,
 				subscribers: subscribers
@@ -100,7 +103,7 @@ var	async = require('async'),
 					}
 
 					emailer.send('digest', userObj.uid, {
-						subject: '[' + meta.config.title + '] Digest for ' + now.getFullYear()+ '/' + (now.getMonth()+1) + '/' + now.getDate(),
+						subject: '[' + meta.config.title + '] [[email:digest.subject, ' + (now.getFullYear()+ '/' + (now.getMonth()+1) + '/' + now.getDate()) + ']]',
 						username: userObj.username,
 						userslug: userObj.userslug,
 						url: nconf.get('url'),

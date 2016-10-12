@@ -1,12 +1,13 @@
 
 'use strict';
 
-var async = require('async'),
+var async = require('async');
 
-	db = require('../database'),
-	meta = require('../meta'),
-	_ = require('underscore'),
-	plugins = require('../plugins');
+var db = require('../database');
+var meta = require('../meta');
+var _ = require('underscore');
+var plugins = require('../plugins');
+var utils = require('../../public/src/utils');
 
 
 module.exports = function(Topics) {
@@ -24,8 +25,10 @@ module.exports = function(Topics) {
 			},
 			function (data, next) {
 				tags = data.tags.slice(0, meta.config.maximumTagsPerTopic || 5);
-				tags = tags.map(Topics.cleanUpTag).filter(function(tag) {
-					return tag && tag.length >= (meta.config.minimumTagLength || 3);
+				tags = tags.map(function(tag) {
+					return utils.cleanUpTag(tag, meta.config.maximumTagLength);
+				}).filter(function(tag, index, array) {
+					return tag && tag.length >= (meta.config.minimumTagLength || 3) && array.indexOf(tag) === index;
 				});
 
 				var keys = tags.map(function(tag) {
@@ -45,18 +48,27 @@ module.exports = function(Topics) {
 		], callback);
 	};
 
-	Topics.cleanUpTag = function(tag) {
-		if (typeof tag !== 'string' || !tag.length ) {
-			return '';
+	Topics.createEmptyTag = function(tag, callback) {
+		if (!tag) {
+			return callback(new Error('[[error:invalid-tag]]'));
 		}
-		tag = tag.trim().toLowerCase();
-		tag = tag.replace(/[,\/#!$%\^\*;:{}=_`<>'"~()?\|]/g, '');
-		tag = tag.substr(0, meta.config.maximumTagLength || 15).trim();
-		var matches = tag.match(/^[.-]*(.+?)[.-]*$/);
-		if (matches && matches.length > 1) {
-			tag = matches[1];
+
+		tag = utils.cleanUpTag(tag, meta.config.maximumTagLength);
+		if (tag.length < (meta.config.minimumTagLength || 3)) {
+			return callback(new Error('[[error:tag-too-short]]'));
 		}
-		return tag;
+
+		async.waterfall([
+			function(next) {
+				db.isSortedSetMember('tags:topic:count', tag, next);
+			},
+			function(isMember, next) {
+				if (isMember) {
+					return next();
+				}
+				db.sortedSetAdd('tags:topic:count', 0, tag, next);
+			}
+		], callback);
 	};
 
 	Topics.updateTag = function(tag, data, callback) {
@@ -244,40 +256,82 @@ module.exports = function(Topics) {
 						updateTagCount(tag, next);
 					}, next);
 				}
-			], function(err, results) {
+			], function(err) {
 				callback(err);
 			});
 		});
 	};
 
 	Topics.searchTags = function(data, callback) {
+		function done(matches) {
+			plugins.fireHook('filter:tags.search', {data: data, matches: matches}, function(err, data) {
+				callback(err, data ? data.matches : []);
+			});
+		}
+
+
 		if (!data || !data.query) {
 			return callback(null, []);
 		}
 
+		if (plugins.hasListeners('filter:topics.searchTags')) {
+			return plugins.fireHook('filter:topics.searchTags', {data: data}, function(err, data) {
+				if (err) {
+					return callback(err);
+				}
+				done(data.matches);
+			});
+		}
+
+		findMatches(data.query, function(err, matches) {
+			if (err) {
+				return callback(err);
+			}
+			done(matches);
+		});
+	};
+
+	Topics.autocompleteTags = function(data, callback) {
+		if (!data || !data.query) {
+			return callback(null, []);
+		}
+
+		if (plugins.hasListeners('filter:topics.autocompleteTags')) {
+			return plugins.fireHook('filter:topics.autocompleteTags', {data: data}, function(err, data) {
+				if (err) {
+					return callback(err);
+				}
+				callback(null, data.matches);
+			});
+		}
+
+		findMatches(data.query, callback);
+	};
+
+	function findMatches(query, callback) {
 		db.getSortedSetRevRange('tags:topic:count', 0, -1, function(err, tags) {
 			if (err) {
-				return callback(null, []);
+				return callback(err);
 			}
 
-			data.query = data.query.toLowerCase();
+			query = query.toLowerCase();
 
 			var matches = [];
 			for(var i=0; i<tags.length; ++i) {
-				if (tags[i].toLowerCase().startsWith(data.query)) {
+				if (tags[i].toLowerCase().startsWith(query)) {
 					matches.push(tags[i]);
+					if (matches.length > 19) {
+						break;
+					}
 				}
 			}
 
-			matches = matches.slice(0, 20).sort(function(a, b) {
+			matches = matches.sort(function(a, b) {
 				return a > b;
 			});
-
-			plugins.fireHook('filter:tags.search', {data: data, matches: matches}, function(err, data) {
-				callback(err, data ? data.matches : []);
-			});
+			callback(null, matches);
 		});
-	};
+	}
 
 	Topics.searchAndLoadTags = function(data, callback) {
 		var searchResult = {
@@ -322,4 +376,34 @@ module.exports = function(Topics) {
 		});
 	};
 
+	Topics.getRelatedTopics = function(topicData, uid, callback) {
+		if (plugins.hasListeners('filter:topic.getRelatedTopics')) {
+			return plugins.fireHook('filter:topic.getRelatedTopics', {topic: topicData, uid: uid}, callback);
+		}
+
+		var maximumTopics = parseInt(meta.config.maximumRelatedTopics, 10) || 0;
+		if (maximumTopics === 0 || !topicData.tags || !topicData.tags.length) {
+			return callback(null, []);
+		}
+
+		maximumTopics = maximumTopics || 5;
+
+		async.waterfall([
+			function (next) {
+				async.map(topicData.tags, function (tag, next) {
+					Topics.getTagTids(tag.value, 0, 5, next);
+				}, next);
+			},
+			function (tids, next) {
+				tids = _.shuffle(_.unique(_.flatten(tids))).slice(0, maximumTopics);
+				Topics.getTopics(tids, uid, next);
+			},
+			function (topics, next) {
+				topics = topics.filter(function(topic) {
+					return topic && !topic.deleted && parseInt(topic.uid, 10) !== parseInt(uid, 10);
+				});
+				next(null, topics);
+			}
+		], callback);
+	};
 };

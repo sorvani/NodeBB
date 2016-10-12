@@ -77,7 +77,7 @@
 							</div>
 							<div class="btn-group btn-group-justified">
 								<div class="btn-group">
-									<button type="button" data-cid="{category.cid}" data-name="image" data-value="{category.image}" class="btn btn-default upload-button"><i class="fa fa-upload"></i> Upload Image</button>
+									<button type="button" data-cid="{category.cid}" class="btn btn-default upload-button"><i class="fa fa-upload"></i> Upload Image</button>
 								</div>
 								<!-- IF category.image -->
 								<div class="btn-group">
@@ -85,6 +85,14 @@
 								</div>
 								<!-- ENDIF category.image -->
 							</div><br />
+
+							<fieldset>
+								<div class="form-group text-center">
+									<label for="category-image">Category Image</label>
+									<br/>
+									<input id="category-image" type="text" class="form-control" placeholder="Category Image" data-name="image" value="{category.image}" />
+								</div>
+							</fieldset>
 
 							<fieldset>
 								<div class="form-group text-center">
@@ -97,7 +105,8 @@
 									<button type="button" class="btn btn-default btn-block <!-- IF category.parent.name -->hide<!-- ENDIF category.parent.name -->" data-action="setParent"><i class="fa fa-sitemap"></i> (None)</button>
 								</div>
 							</fieldset>
-
+							<hr/>
+							<button class="btn btn-info btn-block copy-settings"><i class="fa fa-files-o"></i> Copy Settings From</button>
 							<hr />
 							<button class="btn btn-danger btn-block purge"><i class="fa fa-eraser"></i> Purge Category</button>
 						</div>

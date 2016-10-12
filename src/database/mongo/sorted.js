@@ -1,6 +1,7 @@
 "use strict";
 
 var async = require('async');
+var utils = require('../../../public/src/utils');
 
 module.exports = function(db, module) {
 	var helpers = module.helpers.mongo;
@@ -17,6 +18,9 @@ module.exports = function(db, module) {
 		value = helpers.valueToString(value);
 
 		db.collection('objects').update({_key: key, value: value}, {$set: {score: parseInt(score, 10)}}, {upsert:true, w: 1}, function(err) {
+			if (err && err.message.startsWith('E11000 duplicate key error')) {
+				return module.sortedSetAdd(key, score, value, callback);
+			}
 			callback(err);
 		});
 	};
@@ -37,7 +41,7 @@ module.exports = function(db, module) {
 			bulk.find({_key: key, value: values[i]}).upsert().updateOne({$set: {score: parseInt(scores[i], 10)}});
 		}
 
-		bulk.execute(function(err, result) {
+		bulk.execute(function(err) {
 			callback(err);
 		});
 	}
@@ -55,7 +59,7 @@ module.exports = function(db, module) {
 			bulk.find({_key: keys[i], value: value}).upsert().updateOne({$set: {score: parseInt(score, 10)}});
 		}
 
-		bulk.execute(function(err, result) {
+		bulk.execute(function(err) {
 			callback(err);
 		});
 	};
@@ -85,7 +89,7 @@ module.exports = function(db, module) {
 		}
 		value = helpers.valueToString(value);
 
-		db.collection('objects').remove({_key: {$in: keys}, value: value}, function(err, res) {
+		db.collection('objects').remove({_key: {$in: keys}, value: value}, function(err) {
 			callback(err);
 		});
 	};
@@ -95,7 +99,17 @@ module.exports = function(db, module) {
 		if (!Array.isArray(keys) || !keys.length) {
 			return callback();
 		}
-		db.collection('objects').remove({_key: {$in: keys}, score: {$lte: max, $gte: min}}, function(err) {
+		var query = {_key: {$in: keys}};
+
+		if (min !== '-inf') {
+			query.score = {$gte: min};
+		}
+		if (max !== '+inf') {
+			query.score = query.score || {};
+			query.score.$lte = max;
+		}
+
+		db.collection('objects').remove(query, function(err) {
 			callback(err);
 		});
 	};
@@ -125,8 +139,18 @@ module.exports = function(db, module) {
 		if (withScores) {
 			fields.score = 1;
 		}
+
+		if (Array.isArray(key)) {
+			key = {$in: key};
+		}
+
+		var limit = stop - start + 1;
+		if (limit <= 0) {
+			limit = 0;
+		}
+
 		db.collection('objects').find({_key: key}, {fields: fields})
-			.limit(stop - start + 1)
+			.limit(limit)
 			.skip(start)
 			.sort({score: sort})
 			.toArray(function(err, data) {
@@ -168,12 +192,14 @@ module.exports = function(db, module) {
 			count = 0;
 		}
 
-		var scoreQuery = {};
+		var query = {_key: key};
+
 		if (min !== '-inf') {
-			scoreQuery.$gte = min;
+			query.score = {$gte: min};
 		}
 		if (max !== '+inf') {
-			scoreQuery.$lte = max;
+			query.score = query.score || {};
+			query.score.$lte = max;
 		}
 
 		var fields = {_id: 0, value: 1};
@@ -181,7 +207,7 @@ module.exports = function(db, module) {
 			fields.score = 1;
 		}
 
-		db.collection('objects').find({_key:key, score: scoreQuery}, {fields: fields})
+		db.collection('objects').find(query, {fields: fields})
 			.limit(count)
 			.skip(start)
 			.sort({score: sort})
@@ -364,12 +390,12 @@ module.exports = function(db, module) {
 				map[item.value] = item.score;
 			});
 
-			var	returnData = new Array(values.length),
-				score;
+			var returnData = new Array(values.length);
+			var score;
 
 			for(var i=0; i<values.length; ++i) {
 				score = map[values[i]];
-				returnData[i] = score ? score : null;
+				returnData[i] = utils.isNumber(score) ? score : null;
 			}
 
 			callback(null, returnData);
@@ -451,47 +477,82 @@ module.exports = function(db, module) {
 		});
 	};
 
-	module.getSortedSetUnion = function(sets, start, stop, callback) {
-		getSortedSetUnion(sets, 1, start, stop, callback);
+	module.sortedSetUnionCard = function(keys, callback) {
+		if (!Array.isArray(keys) || !keys.length) {
+			return callback(null, 0);
+		}
+
+		var pipeline = [
+			{ $match: { _key: {$in: keys} } },
+			{ $group: { _id: {value: '$value' } } },
+			{ $group: { _id: null,  count: { $sum: 1 } } }
+		];
+
+		var project = { _id: 0, count: '$count' };
+		pipeline.push({	$project: project });
+
+		db.collection('objects').aggregate(pipeline, function(err, data) {
+			callback(err, Array.isArray(data) && data.length ? data[0].count : 0);
+		});
 	};
 
-	module.getSortedSetRevUnion = function(sets, start, stop, callback) {
-		getSortedSetUnion(sets, -1, start, stop, callback);
+	module.getSortedSetUnion = function(params, callback) {
+		params.sort = 1;
+		getSortedSetUnion(params, callback);
 	};
 
-	function getSortedSetUnion(sets, sort, start, stop, callback) {
-		if (!Array.isArray(sets) || !sets.length) {
+	module.getSortedSetRevUnion = function(params, callback) {
+		params.sort = -1;
+		getSortedSetUnion(params, callback);
+	};
+
+	function getSortedSetUnion(params, callback) {
+		if (!Array.isArray(params.sets) || !params.sets.length) {
 			return callback();
 		}
-		var limit = stop - start + 1;
+		var limit = params.stop - params.start + 1;
 		if (limit <= 0) {
 			limit = 0;
 		}
 
+		var aggregate = {};
+		if (params.aggregate) {
+			aggregate['$' + params.aggregate.toLowerCase()] = '$score';
+		} else {
+			aggregate.$sum = '$score';
+		}
+
 		var pipeline = [
-			{ $match: { _key: {$in: sets}} },
-			{ $group: { _id: {value: '$value'}, totalScore: {$sum : "$score"}} },
-			{ $sort: { totalScore: sort} }
+			{ $match: { _key: {$in: params.sets}} },
+			{ $group: { _id: {value: '$value'}, totalScore: aggregate} },
+			{ $sort: { totalScore: params.sort} }
 		];
 
-		if (start) {
-			pipeline.push({ $skip: start });
+		if (params.start) {
+			pipeline.push({ $skip: params.start });
 		}
 
 		if (limit > 0) {
 			pipeline.push({ $limit: limit });
 		}
 
-		pipeline.push({	$project: { _id: 0, value: '$_id.value' }});
+		var project = { _id: 0, value: '$_id.value' };
+		if (params.withScores) {
+			project.score = '$totalScore';
+		}
+		pipeline.push({	$project: project });
 
 		db.collection('objects').aggregate(pipeline, function(err, data) {
 			if (err || !data) {
 				return callback(err);
 			}
 
-			data = data.map(function(item) {
-				return item.value;
-			});
+			if (!params.withScores) {
+				data = data.map(function(item) {
+					return item.value;
+				});
+			}
+
 			callback(null, data);
 		});
 	}
@@ -502,10 +563,17 @@ module.exports = function(db, module) {
 			return callback();
 		}
 		var data = {};
-		value = helpers.fieldToString(value);
+		value = helpers.valueToString(value);
 		data.score = parseInt(increment, 10);
 
 		db.collection('objects').findAndModify({_key: key, value: value}, {}, {$inc: data}, {new: true, upsert: true}, function(err, result) {
+			// if there is duplicate key error retry the upsert
+			// https://github.com/NodeBB/NodeBB/issues/4467
+			// https://jira.mongodb.org/browse/SERVER-14322
+			// https://docs.mongodb.org/manual/reference/command/findAndModify/#upsert-and-unique-index
+			if (err && err.message.startsWith('E11000 duplicate key error')) {
+				return module.sortedSetIncrBy(key, increment, value, callback);
+			}
 			callback(err, result && result.value ? result.value.score : null);
 		});
 	};
@@ -533,4 +601,136 @@ module.exports = function(db, module) {
 				callback(err, data);
 		});
 	};
+
+	module.processSortedSet = function(setKey, process, batch, callback) {
+		var done = false;
+		var ids = [];
+		var cursor = db.collection('objects').find({_key: setKey})
+			.sort({score: 1})
+			.project({_id: 0, value: 1})
+			.batchSize(batch);
+
+		async.whilst(
+			function() {
+				return !done;
+			},
+			function(next) {
+				cursor.next(function(err, item) {
+					if (err) {
+						return next(err);
+					}
+					if (item === null) {
+						done = true;
+					} else {
+						ids.push(item.value);
+					}
+
+					if (ids.length < batch && (!done || ids.length === 0)) {
+						return next(null);
+					}
+
+					process(ids, function(err) {
+						ids = [];
+						return next(err);
+					});
+				});
+			},
+			callback
+		);
+	};
+
+
+	module.sortedSetIntersectCard = function(keys, callback) {
+		if (!Array.isArray(keys) || !keys.length) {
+			return callback(null, 0);
+		}
+
+		var pipeline = [
+			{ $match: { _key: {$in: keys}} },
+			{ $group: { _id: {value: '$value'}, count: {$sum: 1}} },
+			{ $match: { count: keys.length} },
+			{ $group: { _id: null,  count: { $sum: 1 } } }
+		];
+
+		db.collection('objects').aggregate(pipeline, function(err, data) {
+			callback(err, Array.isArray(data) && data.length ? data[0].count : 0);
+		});
+	};
+
+	module.getSortedSetIntersect = function(params, callback) {
+		params.sort = 1;
+		getSortedSetRevIntersect(params, callback);
+	};
+
+	module.getSortedSetRevIntersect = function(params, callback) {
+		params.sort = -1;
+		getSortedSetRevIntersect(params, callback);
+	};
+
+	function getSortedSetRevIntersect(params, callback) {
+		var sets = params.sets;
+		var start = params.hasOwnProperty('start') ? params.start : 0;
+		var stop = params.hasOwnProperty('stop') ? params.stop : -1;
+		var weights = params.weights || [];
+		var aggregate = {};
+
+		if (params.aggregate) {
+			aggregate['$' + params.aggregate.toLowerCase()] = '$score';
+		} else {
+			aggregate.$sum = '$score';
+		}
+
+		var limit = stop - start + 1;
+		if (limit <= 0) {
+			limit = 0;
+		}
+
+		var pipeline = [{ $match: { _key: {$in: sets}} }];
+
+		weights.forEach(function(weight, index) {
+			if (weight !== 1) {
+				pipeline.push({
+					$project: {
+						value: 1,
+						score: {
+							$cond: { if: { $eq: [ "$_key", sets[index] ] }, then: { $multiply: [ '$score', weight ] }, else: '$score' }
+						}
+					}
+				});
+			}
+		});
+
+		pipeline.push({ $group: { _id: {value: '$value'}, totalScore: aggregate, count: {$sum: 1}} });
+		pipeline.push({ $match: { count: sets.length} });
+		pipeline.push({ $sort: { totalScore: params.sort} });
+
+		if (start) {
+			pipeline.push({ $skip: start });
+		}
+
+		if (limit > 0) {
+			pipeline.push({ $limit: limit });
+		}
+
+		var project = { _id: 0, value: '$_id.value'};
+		if (params.withScores) {
+			project.score = '$totalScore';
+		}
+		pipeline.push({ $project: project });
+
+		db.collection('objects').aggregate(pipeline, function(err, data) {
+			if (err || !data) {
+				return callback(err);
+			}
+
+			if (!params.withScores) {
+				data = data.map(function(item) {
+					return item.value;
+				});
+			}
+
+			callback(null, data);
+		});
+	}
+
 };

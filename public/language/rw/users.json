@@ -2,13 +2,13 @@
     "latest_users": "Abantu Bashya",
     "top_posters": "Abashyizeho Byinshi",
     "most_reputation": "Abafite Amanota Menshi",
+    "most_flags": "Most Flags",
     "search": "Shaka",
     "enter_username": "Shyiramo izina ryo gushaka",
     "load_more": "Zana Ibindi",
     "users-found-search-took": "Habonetse abantu (umuntu) %1! Byatwaye amasegonda %2 gusa.",
     "filter-by": "Yungurura Ukurikije",
     "online-only": "Abari ku murongo gusa",
-    "picture-only": "Ifoto gusa",
     "invite": "Tumira",
     "invitation-email-sent": "Ubutumire bwa email bwohererejwe %1",
     "user_list": "Urutonde rw'Abantu",
@@ -17,5 +17,5 @@
     "unread_topics": "Ibiganiro Bitarasomwa",
     "categories": "Ibyiciro",
     "tags": "Ibimenyetso",
-    "map": "Ikarita"
+    "no-users-found": "Nta muntu wabonetse"
 }

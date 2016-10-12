@@ -1,23 +1,21 @@
 'use strict';
 
-var fs = require('fs'),
-	path = require('path'),
-	async = require('async'),
-	winston = require('winston'),
-	semver = require('semver'),
-	express = require('express'),
-	nconf = require('nconf'),
+var fs = require('fs');
+var path = require('path');
+var async = require('async');
+var winston = require('winston');
+var semver = require('semver');
+var express = require('express');
+var nconf = require('nconf');
 
-	db = require('./database'),
-	emitter = require('./emitter'),
-	meta = require('./meta'),
-	translator = require('../public/src/modules/translator'),
-	utils = require('../public/src/utils'),
-	hotswap = require('./hotswap'),
-	file = require('./file'),
+var db = require('./database');
+var emitter = require('./emitter');
+var utils = require('../public/src/utils');
+var hotswap = require('./hotswap');
+var file = require('./file');
 
-	controllers = require('./controllers'),
-	app, middleware;
+var app;
+var middleware;
 
 (function(Plugins) {
 	require('./plugins/install')(Plugins);
@@ -30,7 +28,9 @@ var fs = require('fs'),
 	Plugins.cssFiles = [];
 	Plugins.lessFiles = [];
 	Plugins.clientScripts = [];
-	Plugins.customLanguages = [];
+	Plugins.acpScripts = [];
+	Plugins.customLanguages = {};
+	Plugins.customLanguageFallbacks = {};
 	Plugins.libraryPaths = [];
 	Plugins.versionWarning = [];
 
@@ -80,14 +80,29 @@ var fs = require('fs'),
 		Plugins.cssFiles.length = 0;
 		Plugins.lessFiles.length = 0;
 		Plugins.clientScripts.length = 0;
+		Plugins.acpScripts.length = 0;
 		Plugins.libraryPaths.length = 0;
 
-		Plugins.registerHook('core', {
-			hook: 'static:app.load',
-			method: addLanguages
-		});
+		// Plugins.registerHook('core', {
+		// 	hook: 'static:app.load',
+		// 	method: addLanguages
+		// });
 
 		async.waterfall([
+			function(next) {
+				// Build language code list
+				fs.readdir(path.join(__dirname, '../public/language'), function(err, directories) {
+					if (err) {
+						return next(err);
+					}
+
+					Plugins.languageCodes = directories.filter(function(code) {
+						return code !== 'TODO';
+					});
+
+					next();
+				});
+			},
 			function(next) {
 				db.getSortedSetRange('plugins:active', 0, -1, next);
 			},
@@ -95,8 +110,6 @@ var fs = require('fs'),
 				if (!Array.isArray(plugins)) {
 					return next();
 				}
-
-				plugins.push(meta.config['theme:id']);
 
 				plugins = plugins.filter(function(plugin){
 					return plugin && typeof plugin === 'string';
@@ -114,7 +127,7 @@ var fs = require('fs'),
 					process.stdout.write('\n');
 					winston.warn('[plugins/load] The following plugins may not be compatible with your version of NodeBB. This may cause unintended behaviour or crashing. In the event of an unresponsive NodeBB caused by this plugin, run `./nodebb reset -p PLUGINNAME` to disable it.');
 					for(var x=0,numPlugins=Plugins.versionWarning.length;x<numPlugins;x++) {
-						process.stdout.write('  * '.yellow + Plugins.versionWarning[x].reset + '\n');
+						process.stdout.write('  * '.yellow + Plugins.versionWarning[x] + '\n');
 					}
 					process.stdout.write('\n');
 				}
@@ -134,11 +147,13 @@ var fs = require('fs'),
 	Plugins.reloadRoutes = function(callback) {
 		callback = callback || function() {};
 		var router = express.Router();
+
 		router.hotswapId = 'plugins';
 		router.render = function() {
 			app.render.apply(app, arguments);
 		};
 
+		var controllers = require('./controllers');
 		Plugins.fireHook('static:app.load', {app: app, router: router, middleware: middleware, controllers: controllers}, function(err) {
 			if (err) {
 				return winston.error('[plugins] Encountered error while executing post-router plugins hooks: ' + err.message);
@@ -151,19 +166,55 @@ var fs = require('fs'),
 	};
 
 	Plugins.getTemplates = function(callback) {
-		var templates = {};
+		var templates = {},
+			tplName;
 
-		Plugins.showInstalled(function(err, plugins) {
-			async.each(plugins, function(plugin, next) {
-				if (plugin.templates && plugin.id && plugin.active) {
-					var templatesPath = path.join(__dirname, '../node_modules', plugin.id, plugin.templates);
+		async.waterfall([
+			async.apply(db.getSortedSetRange, 'plugins:active', 0, -1),
+			function(plugins, next) {
+				var pluginBasePath = path.join(__dirname, '../node_modules');
+				var paths = plugins.map(function(plugin) {
+					return path.join(pluginBasePath, plugin);
+				});
+
+				// Filter out plugins with invalid paths
+				async.filter(paths, file.exists, function(paths) {
+					next(null, paths);
+				});
+			},
+			function(paths, next) {
+				async.map(paths, Plugins.loadPluginInfo, next);
+			}
+		], function(err, plugins) {
+			if (err) {
+				return callback(err);
+			}
+
+			async.eachSeries(plugins, function(plugin, next) {
+				if (plugin.templates || plugin.id.startsWith('nodebb-theme-')) {
+					winston.verbose('[plugins] Loading templates (' + plugin.id + ')');
+					var templatesPath = path.join(__dirname, '../node_modules', plugin.id, plugin.templates || 'templates');
 					utils.walk(templatesPath, function(err, pluginTemplates) {
 						if (pluginTemplates) {
 							pluginTemplates.forEach(function(pluginTemplate) {
-								templates["/" + pluginTemplate.replace(templatesPath, '').substring(1)] = pluginTemplate;
+								if (pluginTemplate.endsWith('.tpl')) {
+									tplName = "/" + pluginTemplate.replace(templatesPath, '').substring(1);
+
+									if (templates.hasOwnProperty(tplName)) {
+										winston.verbose('[plugins] ' + tplName + ' replaced by ' + plugin.id);
+									}
+
+									templates[tplName] = pluginTemplate;
+								} else {
+									winston.warn('[plugins] Skipping ' + pluginTemplate + ' by plugin ' + plugin.id);
+								}
 							});
 						} else {
-							winston.warn('[plugins/' + plugin.id + '] A templates directory was defined for this plugin, but was not found.');
+							if (err) {
+								winston.error(err);
+							} else {
+								winston.warn('[plugins/' + plugin.id + '] A templates directory was defined for this plugin, but was not found.');
+							}
 						}
 
 						next(false);
@@ -207,11 +258,9 @@ var fs = require('fs'),
 		require('request')(url, {
 			json: true
 		}, function(err, res, body) {
-			var plugins = [];
-
 			if (err) {
 				winston.error('Error parsing plugins : ' + err.message);
-				plugins = [];
+				return callback(err);
 			}
 
 			Plugins.normalise(body, callback);
@@ -219,9 +268,9 @@ var fs = require('fs'),
 	};
 
 	Plugins.normalise = function(apiReturn, callback) {
-		var pluginMap = {},
-			dependencies = require.main.require('./package.json').dependencies;
-
+		var pluginMap = {};
+		var dependencies = require.main.require('./package.json').dependencies;
+		apiReturn = apiReturn || [];
 		for(var i=0; i<apiReturn.length; ++i) {
 			apiReturn[i].id = apiReturn[i].name;
 			apiReturn[i].installed = false;
@@ -352,62 +401,10 @@ var fs = require('fs'),
 						next();
 					});
 				}, function(err) {
-					next(null, plugins);
+					next(err, plugins);
 				});
 			}
 		], callback);
 	};
-
-	Plugins.clearRequireCache = function(next) {
-		var cached = Object.keys(require.cache);
-		async.waterfall([
-			async.apply(async.map, Plugins.libraryPaths, fs.realpath),
-			function(paths, next) {
-				paths = paths.map(function(pluginLib) {
-					var parent = path.dirname(pluginLib);
-					return cached.filter(function(libPath) {
-						return libPath.indexOf(parent) !== -1;
-					});
-				}).reduce(function(prev, cur) {
-					return prev.concat(cur);
-				});
-
-				Plugins.fireHook('filter:plugins.clearRequireCache', {paths: paths}, next);
-			},
-			function(data, next) {
-				for (var x=0,numPaths=data.paths.length;x<numPaths;x++) {
-					delete require.cache[data.paths[x]];
-				}
-				winston.verbose('[plugins] Plugin libraries removed from Node.js cache');
-
-				next();
-			}
-		], next);
-	};
-
-	function addLanguages(params, callback) {
-		Plugins.customLanguages.forEach(function(lang) {
-			params.router.get('/language' + lang.route, function(req, res, next) {
-				res.json(lang.file);
-			});
-
-			var components = lang.route.split('/'),
-				language = components[1],
-				filename = components[2].replace('.json', '');
-
-			translator.addTranslation(language, filename, lang.file);
-		});
-
-		var fallbackPath;
-		for(var resource in Plugins.customLanguageFallbacks) {
-			fallbackPath = Plugins.customLanguageFallbacks[resource];
-			params.router.get('/language/:lang/' + resource + '.json', function(req, res, next) {
-				winston.verbose('[translator] No resource file found for ' + req.params.lang + '/' + resource + ', using provided fallback language file');
-				res.sendFile(fallbackPath);
-			});
-		}
-
-		callback(null);
-	}
 
 }(exports));

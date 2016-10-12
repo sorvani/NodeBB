@@ -6,6 +6,7 @@ var winston = require('winston');
 
 var db = require('../database');
 var plugins = require('../plugins');
+var utils = require('../../public/src/utils');
 
 module.exports = function(User) {
 
@@ -48,6 +49,10 @@ module.exports = function(User) {
 		if (fields.indexOf('picture') !== -1) {
 			addField('email');
 			addField('uploadedpicture');
+		}
+
+		if (fields.indexOf('status') !== -1) {
+			addField('lastonline');
 		}
 
 		db.getObjectsFields(keys, fields, function(err, users) {
@@ -94,7 +99,9 @@ module.exports = function(User) {
 				return;
 			}
 
-			user.username = validator.escape(user.username);
+			if (user.hasOwnProperty('username')) {
+				user.username = validator.escape(user.username ? user.username.toString() : '');
+			}
 
 			if (user.password) {
 				user.password = undefined;
@@ -115,6 +122,10 @@ module.exports = function(User) {
 				user.uploadedpicture = user.uploadedpicture.startsWith('http') ? user.uploadedpicture : nconf.get('relative_path') + user.uploadedpicture;
 			}
 
+			if (user.hasOwnProperty('status') && parseInt(user.lastonline, 10)) {
+				user.status = User.getStatus(user);
+			}
+
 			for(var i=0; i<fieldsToRemove.length; ++i) {
 				user[fieldsToRemove[i]] = undefined;
 			}
@@ -125,6 +136,14 @@ module.exports = function(User) {
 				user['icon:bgColor'] = iconBackgrounds[Array.prototype.reduce.call(user.username, function(cur, next) {
 					return cur + next.charCodeAt();
 				}, 0) % iconBackgrounds.length];
+			}
+
+			if (user.hasOwnProperty('joindate')) {
+				user.joindateISO = utils.toISOString(user.joindate);
+			}
+
+			if (user.hasOwnProperty('lastonline')) {
+				user.lastonlineISO = utils.toISOString(user.lastonline) || user.joindateISO;
 			}
 		});
 

@@ -5,7 +5,7 @@
 
 	if ('undefined' === typeof window) {
 		fs = require('fs');
-		XRegExp = require('xregexp').XRegExp;
+		XRegExp = require('xregexp');
 
 		process.profile = function(operation, start) {
 			console.log('%s took %d milliseconds', operation, process.elapsedTimeSince(start));
@@ -45,8 +45,16 @@
 				list.forEach(function(file) {
 					file = dir + '/' + file;
 					fs.stat(file, function(err, stat) {
+						if (err) {
+							return done(err);
+						}
+
 						if (stat && stat.isDirectory()) {
 							utils.walk(file, function(err, res) {
+								if (err) {
+									return done(err);
+								}
+
 								results = results.concat(res);
 								if (!--pending) {
 									done(null, results);
@@ -90,6 +98,23 @@
 			str = str.replace(utils.trimTrailingDash, '');
 			str = str.replace(utils.trimLeadingDash, '');
 			return str;
+		},
+
+		cleanUpTag: function(tag, maxLength) {
+			if (typeof tag !== 'string' || !tag.length ) {
+				return '';
+			}
+
+			tag = tag.trim().toLowerCase();
+			// see https://github.com/NodeBB/NodeBB/issues/4378
+			tag = tag.replace(/\u202E/gi, '');
+			tag = tag.replace(/[,\/#!$%\^\*;:{}=_`<>'"~()?\|]/g, '');
+			tag = tag.substr(0, maxLength || 15).trim();
+			var matches = tag.match(/^[.-]*(.+?)[.-]*$/);
+			if (matches && matches.length > 1) {
+				tag = matches[1];
+			}
+			return tag;
 		},
 
 		removePunctuation: function(str) {
@@ -160,7 +185,7 @@
 		},
 
 		fileMimeType: function (path) {
-			utils.extensionToMimeType(utils.fileExtension(path));
+			return utils.extensionToMimeType(utils.fileExtension(path));
 		},
 
 		extensionToMimeType: function(extension) {
@@ -257,6 +282,56 @@
 					return env;
 				}
 			}
+		},
+
+		isMobile: function() {
+			var env = utils.findBootstrapEnvironment();
+			return ['xs', 'sm'].some(function(targetEnv) {
+				return targetEnv === env;
+			});
+		},
+
+		getHoursArray: function() {
+			var currentHour = new Date().getHours(),
+				labels = [];
+
+			for (var i = currentHour, ii = currentHour - 24; i > ii; i--) {
+				var hour = i < 0 ? 24 + i : i;
+				labels.push(hour + ':00');
+			}
+
+			return labels.reverse();
+		},
+
+		getDaysArray: function(from) {
+			var currentDay = new Date(from || Date.now()).getTime(),
+				months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+				labels = [],
+				tmpDate;
+
+			for(var x=29;x>=0;x--) {
+				tmpDate = new Date(currentDay - (1000*60*60*24*x));
+				labels.push(months[tmpDate.getMonth()] + ' ' + tmpDate.getDate());
+			}
+
+			return labels;
+		},
+
+		/* Retrieved from http://stackoverflow.com/a/7557433 @ 27 Mar 2016 */
+		isElementInViewport: function(el) {
+			//special bonus for those using jQuery
+			if (typeof jQuery === "function" && el instanceof jQuery) {
+				el = el[0];
+			}
+
+			var rect = el.getBoundingClientRect();
+
+			return (
+				rect.top >= 0 &&
+				rect.left >= 0 &&
+				rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && /*or $(window).height() */
+				rect.right <= (window.innerWidth || document.documentElement.clientWidth) /*or $(window).width() */
+			);
 		},
 
 		// get all the url params in a single key/value hash
@@ -356,6 +431,14 @@
 			}
 
 			return utils.props(obj[prop], newProps, value);
+		},
+
+		isInternalURI: function(targetLocation, referenceLocation, relative_path) {
+			return targetLocation.host === '' ||	// Relative paths are always internal links
+				(
+					targetLocation.host === referenceLocation.host && targetLocation.protocol === referenceLocation.protocol &&	// Otherwise need to check if protocol and host match
+					(relative_path.length > 0 ? targetLocation.pathname.indexOf(relative_path) === 0 : true)	// Subfolder installs need this additional check
+				);
 		}
 	};
 

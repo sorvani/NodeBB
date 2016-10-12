@@ -1,9 +1,9 @@
 'use strict';
 
-var async = require('async'),
-	db = require('../database'),
-	meta = require('../meta'),
-	privileges = require('../privileges');
+var async = require('async');
+var db = require('../database');
+var meta = require('../meta');
+var privileges = require('../privileges');
 
 module.exports = function(User) {
 
@@ -63,7 +63,7 @@ module.exports = function(User) {
 	};
 
 	User.onNewPostMade = function(postData, callback) {
-		async.parallel([
+		async.series([
 			function(next) {
 				User.addPostIdToUser(postData.uid, postData.pid, postData.timestamp, next);
 			},
@@ -72,19 +72,15 @@ module.exports = function(User) {
 			},
 			function(next) {
 				User.setUserField(postData.uid, 'lastposttime', postData.timestamp, next);
+			},
+			function(next) {
+				User.updateLastOnlineTime(postData.uid, next);
 			}
 		], callback);
 	};
 
 	User.addPostIdToUser = function(uid, pid, timestamp, callback) {
 		db.sortedSetAdd('uid:' + uid + ':posts', timestamp, pid, callback);
-	};
-
-	User.addTopicIdToUser = function(uid, tid, timestamp, callback) {
-		async.parallel([
-			async.apply(db.sortedSetAdd, 'uid:' + uid + ':topics', timestamp, tid),
-			async.apply(User.incrementUserFieldBy, uid, 'topiccount', 1)
-		], callback);
 	};
 
 	User.incrementUserPostCountBy = function(uid, value, callback) {

@@ -1,7 +1,40 @@
 "use strict";
-/*global config, translator, componentHandler, define, socket, app, ajaxify, utils, bootbox, Mousetrap, Hammer, Slideout, RELATIVE_PATH*/
+/*global config, componentHandler, socket, app, bootbox, Slideout, NProgress*/
 
 (function() {
+	var logoutTimer = 0;
+	function startLogoutTimer() {
+		if (logoutTimer) {
+			clearTimeout(logoutTimer);
+		}
+
+		logoutTimer = setTimeout(function() {
+			require(['translator'], function(translator) {
+				translator.translate('[[login:logged-out-due-to-inactivity]]', function(translated) {
+					bootbox.alert({
+						closeButton: false,
+						message: translated,
+						callback: function(){
+							window.location.reload();
+						}
+					});
+				});
+			});
+		}, 3600000);
+	}
+
+	$(window).on('action:ajaxify.end', function() {
+		showCorrectNavTab();
+		startLogoutTimer();
+	});
+
+	function showCorrectNavTab() {
+		// show correct tab if url has #
+		if (window.location.hash) {
+			$('.nav-pills a[href="' + window.location.hash + '"]').tab('show');
+		}
+	}
+
 	$(document).ready(function() {
 		setupKeybindings();
 
@@ -11,36 +44,47 @@
 			});
 		}
 
-		$(window).on('action:ajaxify.contentLoaded', function(ev, data) {
-			var url = data.url;
-
-			selectMenuItem(data.url);
-			setupRestartLinks();
-
-			componentHandler.upgradeDom();
-		});
-
 		$('[component="logout"]').on('click', app.logout);
 		app.alert = launchSnackbar;
 
 		configureSlidemenu();
+		setupNProgress();
 	});
 
+	$(window).on('action:ajaxify.contentLoaded', function(ev, data) {
+		selectMenuItem(data.url);
+		setupRestartLinks();
+
+		componentHandler.upgradeDom();
+	});
+
+	function setupNProgress() {
+		$(window).on('action:ajaxify.start', function() {
+			NProgress.set(0.7);
+		});
+
+		$(window).on('action:ajaxify.end', function() {
+			NProgress.done();
+		});
+	}
+
 	function setupKeybindings() {
-		Mousetrap.bind('ctrl+shift+a r', function() {
-			require(['admin/modules/instance'], function(instance) {
-				instance.reload();
+		require(['mousetrap'], function(mousetrap) {
+			mousetrap.bind('ctrl+shift+a r', function() {
+				require(['admin/modules/instance'], function(instance) {
+					instance.reload();
+				});
 			});
-		});
 
-		Mousetrap.bind('ctrl+shift+a R', function() {
-			socket.emit('admin.restart');
-		});
+			mousetrap.bind('ctrl+shift+a R', function() {
+				socket.emit('admin.restart');
+			});
 
-		Mousetrap.bind('/', function(e) {
-			$('#acp-search input').focus();
+			mousetrap.bind('/', function() {
+				$('#acp-search input').focus();
 
-			return false;
+				return false;
+			});
 		});
 	}
 
@@ -100,16 +144,18 @@
 	function launchSnackbar(params) {
 		var message = (params.title ? "<strong>" + params.title + "</strong>" : '') + (params.message ? params.message : '');
 
-		translator.translate(message, function(html) {
-			var bar = $.snackbar({
-				content: html,
-				timeout: 3000,
-				htmlAllowed: true
-			});
+		require(['translator'], function(translator) {
+			translator.translate(message, function(html) {
+				var bar = $.snackbar({
+					content: html,
+					timeout: 3000,
+					htmlAllowed: true
+				});
 
-			if (params.clickfn) {
-				bar.on('click', params.clickfn);
-			}
+				if (params.clickfn) {
+					bar.on('click', params.clickfn);
+				}
+			});
 		});
 	}
 

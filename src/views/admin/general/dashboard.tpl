@@ -13,15 +13,15 @@
 				<hr/>
 				<div class="text-center pull-left monthly-pageviews">
 					<div><strong id="pageViewsLastMonth"></strong></div>
-					<div>Page views Last Month</div>
+					<div><a href="#" data-action="updateGraph" data-units="days" data-until="last-month">Page views Last Month</a></div>
 				</div>
 				<div class="text-center pull-left monthly-pageviews">
 					<div><strong id="pageViewsThisMonth"></strong></div>
-					<div>Page views This Month</div>
+					<div><a href="#" data-action="updateGraph" data-units="days">Page views This Month</a></div>
 				</div>
 				<div class="text-center pull-left monthly-pageviews">
 					<div><strong id="pageViewsPastDay"></strong></div>
-					<div>Page views in last 24 hours</div>
+					<div><a href="#" data-action="updateGraph" data-units="hours">Page views in last 24 hours</a></div>
 				</div>
 			</div>
 		</div>
@@ -95,15 +95,21 @@
 			<div class="panel-heading">System Control</div>
 			<div class="panel-body text-center">
 				<p>
-					<button class="btn btn-warning reload" data-placement="bottom" data-toggle="tooltip" title="Reload NodeBB to activate new plugins">Reload</button>
-					<button class="btn btn-danger restart" data-placement="bottom" data-toggle="tooltip" title="Restarting NodeBB will drop all existing connections for a few seconds">Restart</button>
+					<button class="btn btn-danger btn-block restart" data-placement="bottom" data-toggle="tooltip" title="Restarting NodeBB will drop all existing connections for a few seconds">Restart</button>
 				</p>
 				<p>
-					<a href="{config.relative_path}/admin/settings/advanced" class="btn btn-info" data-placement="bottom" data-toggle="tooltip" title="Click here to set up maintenance mode for NodeBB">Maintenance Mode</a>
+					<a href="{config.relative_path}/admin/settings/advanced" class="btn btn-info btn-block" data-placement="bottom" data-toggle="tooltip" title="Click here to set up maintenance mode for NodeBB">Maintenance Mode</a>
 				</p>
 
 				<hr />
 				<span id="toggle-realtime">Realtime Chart Updates <strong>OFF</strong> <i class="fa fa fa-toggle-off pointer"></i></span>
+			</div>
+		</div>
+
+		<div class="panel panel-default">
+			<div class="panel-heading">Active Users</div>
+			<div class="panel-body">
+				<div id="active-users"></div>
 			</div>
 		</div>
 
@@ -146,13 +152,5 @@
 			</div>
 		</div>
 
-
-
-		<div class="panel panel-default">
-			<div class="panel-heading">Active Users</div>
-			<div class="panel-body">
-				<div id="active-users"></div>
-			</div>
-		</div>
 	</div>
 </div>

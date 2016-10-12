@@ -1,6 +1,9 @@
 'use strict';
 
 var async = require('async');
+var winston = require('winston');
+var validator = require('validator');
+
 var topics = require('../../topics');
 var events = require('../../events');
 var privileges = require('../../privileges');
@@ -11,7 +14,7 @@ module.exports = function(SocketTopics) {
 
 	SocketTopics.loadTopicTools = function(socket, data, callback) {
 		if (!socket.uid) {
-			return;
+			return callback(new Error('[[error:no-privileges]]'));
 		}
 		if (!data) {
 			return callback(new Error('[[error:invalid-data]]'));
@@ -74,7 +77,7 @@ module.exports = function(SocketTopics) {
 	SocketTopics.doTopicAction = function(action, event, socket, data, callback) {
 		callback = callback || function() {};
 		if (!socket.uid) {
-			return;
+			return callback(new Error('[[error:no-privileges]]'));
 		}
 
 		if (!data || !Array.isArray(data.tids) || !data.cid) {
@@ -94,11 +97,17 @@ module.exports = function(SocketTopics) {
 				socketHelpers.emitToTopicAndCategory(event, data);
 
 				if (action === 'delete' || action === 'restore' || action === 'purge') {
-					events.log({
-						type: 'topic-' + action,
-						uid: socket.uid,
-						ip: socket.ip,
-						tid: tid
+					topics.getTopicField(tid, 'title', function(err, title) {
+						if (err) {
+							return winston.error(err);
+						}
+						events.log({
+							type: 'topic-' + action,
+							uid: socket.uid,
+							ip: socket.ip,
+							tid: tid,
+							title: validator.escape(String(title))
+						});
 					});
 				}
 

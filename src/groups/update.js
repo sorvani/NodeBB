@@ -1,17 +1,12 @@
 'use strict';
 
-var async = require('async'),
-	winston = require('winston'),
-	crypto = require('crypto'),
-	path = require('path'),
-	nconf = require('nconf'),
-	fs = require('fs'),
+var async = require('async');
+var winston = require('winston');
 
-	plugins = require('../plugins'),
-	utils = require('../../public/src/utils'),
-	db = require('../database'),
+var plugins = require('../plugins');
+var utils = require('../../public/src/utils');
+var db = require('../database');
 
-	uploadsController = require('../controllers/uploads');
 
 module.exports = function(Groups) {
 
@@ -22,49 +17,63 @@ module.exports = function(Groups) {
 				return callback(err || new Error('[[error:no-group]]'));
 			}
 
-			var payload = {
-				description: values.description || '',
-				icon: values.icon || '',
-				labelColor: values.labelColor || '#000000'
-			};
-
-			if (values.hasOwnProperty('userTitle')) {
-				payload.userTitle = values.userTitle || '';
-			}
-
-			if (values.hasOwnProperty('userTitleEnabled')) {
-				payload.userTitleEnabled = values.userTitleEnabled ? '1' : '0';
-			}
-
-			if (values.hasOwnProperty('hidden')) {
-				payload.hidden = values.hidden ? '1' : '0';
-			}
-
-			if (values.hasOwnProperty('private')) {
-				payload.private = values.private ? '1' : '0';
-			}
-
-			async.series([
-				async.apply(updatePrivacy, groupName, values.private),
-				function(next) {
-					if (values.hasOwnProperty('hidden')) {
-						updateVisibility(groupName, values.hidden, next);
-					} else {
-						next();
-					}
-				},
-				async.apply(db.setObject, 'group:' + groupName, payload),
-				async.apply(renameGroup, groupName, values.name)
-			], function(err) {
+			plugins.fireHook('filter:group.update', {
+				groupName: groupName,
+				values: values
+			}, function(err) {
 				if (err) {
 					return callback(err);
 				}
 
-				plugins.fireHook('action:group.update', {
-					name: groupName,
-					values: values
+				var payload = {
+					description: values.description || '',
+					icon: values.icon || '',
+					labelColor: values.labelColor || '#000000'
+				};
+	
+				if (values.hasOwnProperty('userTitle')) {
+					payload.userTitle = values.userTitle || '';
+				}
+	
+				if (values.hasOwnProperty('userTitleEnabled')) {
+					payload.userTitleEnabled = values.userTitleEnabled ? '1' : '0';
+				}
+	
+				if (values.hasOwnProperty('hidden')) {
+					payload.hidden = values.hidden ? '1' : '0';
+				}
+	
+				if (values.hasOwnProperty('private')) {
+					payload.private = values.private ? '1' : '0';
+				}
+	
+				if (values.hasOwnProperty('disableJoinRequests')) {
+					payload.disableJoinRequests = values.disableJoinRequests ? '1' : '0';
+				}
+	
+				async.series([
+					async.apply(checkNameChange, groupName, values.name),
+					async.apply(updatePrivacy, groupName, values.private),
+					function(next) {
+						if (values.hasOwnProperty('hidden')) {
+							updateVisibility(groupName, values.hidden, next);
+						} else {
+							next();
+						}
+					},
+					async.apply(db.setObject, 'group:' + groupName, payload),
+					async.apply(renameGroup, groupName, values.name)
+				], function(err) {
+					if (err) {
+						return callback(err);
+					}
+	
+					plugins.fireHook('action:group.update', {
+						name: groupName,
+						values: values
+					});
+					callback();
 				});
-				callback();
 			});
 		});
 	};
@@ -109,82 +118,6 @@ module.exports = function(Groups) {
 		});
 	}
 
-	Groups.updateCoverPosition = function(groupName, position, callback) {
-		Groups.setGroupField(groupName, 'cover:position', position, callback);
-	};
-
-	Groups.updateCover = function(data, callback) {
-		var tempPath, md5sum, url;
-
-		// Position only? That's fine
-		if (!data.imageData && data.position) {
-			return Groups.updateCoverPosition(data.groupName, data.position, callback);
-		}
-
-		async.series([
-			function(next) {
-				if (data.file) {
-					return next();
-				}
-
-				// Calculate md5sum of image
-				// This is required because user data can be private
-				md5sum = crypto.createHash('md5');
-				md5sum.update(data.imageData);
-				md5sum = md5sum.digest('hex');
-				next();
-			},
-			function(next) {
-				if (data.file) {
-					return next();
-				}
-
-				// Save image
-				tempPath = path.join(nconf.get('base_dir'), nconf.get('upload_path'), md5sum);
-				var buffer = new Buffer(data.imageData.slice(data.imageData.indexOf('base64') + 7), 'base64');
-
-				fs.writeFile(tempPath, buffer, {
-					encoding: 'base64'
-				}, next);
-			},
-			function(next) {
-				uploadsController.uploadGroupCover({
-					name: 'groupCover',
-					path: data.file ? data.file : tempPath
-				}, function(err, uploadData) {
-					if (err) {
-						return next(err);
-					}
-
-					url = uploadData.url;
-					next();
-				});
-			},
-			function(next) {
-				Groups.setGroupField(data.groupName, 'cover:url', url, next);
-			},
-			function(next) {
-				fs.unlink(data.file ? data.file : tempPath, next);	// Delete temporary file
-			}
-		], function(err) {
-			if (err) {
-				return callback(err);
-			}
-
-			if (data.position) {
-				Groups.updateCoverPosition(data.groupName, data.position, function(err) {
-					callback(err, {url: url});
-				});
-			} else {
-				callback(err, {url: url});
-			}
-		});
-	};
-
-	Groups.removeCover = function(data, callback) {
-		db.deleteObjectField('group:' + data.groupName, 'cover:url', callback);
-	};
-
 	function updatePrivacy(groupName, newValue, callback) {
 		if (!newValue) {
 			return callback();
@@ -217,6 +150,23 @@ module.exports = function(Groups) {
 		});
 	}
 
+	function checkNameChange(currentName, newName, callback) {
+		if (currentName === newName) {
+			return callback();
+		}
+		var currentSlug = utils.slugify(currentName);
+		var newSlug = utils.slugify(newName);
+		if (currentSlug === newSlug) {
+			return callback();
+		}
+		Groups.existsBySlug(newSlug, function(err, exists) {
+			if (err || exists) {
+				return callback(err || new Error('[[error:group-already-exists]]'));
+			}
+			callback();
+		});
+	}
+
 	function renameGroup(oldName, newName, callback) {
 		if (oldName === newName || !newName || newName.length === 0) {
 			return callback();
@@ -227,7 +177,7 @@ module.exports = function(Groups) {
 				return callback(err);
 			}
 
-			if (parseInt(group.system, 10) === 1 || parseInt(group.hidden, 10) === 1) {
+			if (parseInt(group.system, 10) === 1) {
 				return callback();
 			}
 

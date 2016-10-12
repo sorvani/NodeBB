@@ -6,16 +6,7 @@ var async = require('async'),
 	prompt = require('prompt'),
 	winston = require('winston'),
 	nconf = require('nconf'),
-	utils = require('../public/src/utils.js'),
-
-	DATABASES = {
-		"redis": {
-			"dependencies": ["redis@~0.10.1", "connect-redis@~2.0.0"]
-		},
-		"mongo": {
-			"dependencies": ["mongodb@~2.0.0", "connect-mongo@~0.8.2"]
-		}
-	};
+	utils = require('../public/src/utils.js');
 
 
 var install = {},
@@ -40,7 +31,7 @@ questions.main = [
 	{
 		name: 'database',
 		description: 'Which database to use',
-		'default': nconf.get('database') || 'redis'
+		'default': nconf.get('database') || 'mongo'
 	}
 ];
 
@@ -52,8 +43,8 @@ questions.optional = [
 ];
 
 function checkSetupFlag(next) {
-	var	envSetupKeys = ['database'],
-		setupVal;
+	var setupVal;
+
 	try {
 		if (nconf.get('setup')) {
 			setupVal = JSON.parse(nconf.get('setup'));
@@ -83,14 +74,10 @@ function checkSetupFlag(next) {
 
 			process.exit();
 		}
-	} else if (envSetupKeys.every(function(key) {
-		return nconf.stores.env.store.hasOwnProperty(key);
-	})) {
-		install.values = envSetupKeys.reduce(function(config, key) {
-			config[key] = nconf.stores.env.store[key];
-			return config;
-		}, {});
-
+	} else if (nconf.get('database')) {
+		install.values = {
+			database: nconf.get('database')
+		};
 		next();
 	} else {
 		next();
@@ -145,36 +132,22 @@ function setupConfig(next) {
 				process.exit();
 			}
 
-			if (nconf.get('advanced')) {
-				prompt.get({
-					name: 'secondary_database',
-					description: 'Select secondary database',
-					'default': nconf.get('secondary_database') || 'none'
-				}, function(err, dbConfig) {
-					config.secondary_database = dbConfig.secondary_database;
-					configureDatabases(err, config, DATABASES, function(err, config) {
-						completeConfigSetup(err, config, next);
-					});
-				});
-			} else {
-				configureDatabases(err, config, DATABASES, function(err, config) {
-					completeConfigSetup(err, config, next);
-				});
-			}
+			configureDatabases(config, function(err, config) {
+				completeConfigSetup(err, config, next);
+			});
 		});
 	} else {
 		// Use provided values, fall back to defaults
 		var	config = {},
 			redisQuestions = require('./database/redis').questions,
 			mongoQuestions = require('./database/mongo').questions,
-			question, x, numQ, allQuestions = questions.main.concat(questions.optional).concat(redisQuestions).concat(mongoQuestions);
+			allQuestions = questions.main.concat(questions.optional).concat(redisQuestions).concat(mongoQuestions);
 
-		for(x=0,numQ=allQuestions.length;x<numQ;x++) {
-			question = allQuestions[x];
+		allQuestions.forEach(function (question) {
 			config[question.name] = install.values[question.name] || question['default'] || undefined;
-		}
+		});
 
-		configureDatabases(null, config, DATABASES, function(err, config) {
+		configureDatabases(config, function(err, config) {
 			completeConfigSetup(err, config, next);
 		});
 	}
@@ -200,79 +173,22 @@ function completeConfigSetup(err, config, next) {
 			return next(err);
 		}
 
-		setupDatabase(config, next);
-	});
-}
-
-function setupDatabase(server_conf, next) {
-	install.installDbDependencies(server_conf, function(err) {
-		if (err) {
-			return next(err);
-		}
-
 		require('./database').init(next);
 	});
 }
 
-install.installDbDependencies = function(server_conf, next) {
-	var	npm = require('npm'),
-		packages = [];
-
-	npm.load({}, function(err) {
-		if (err) {
-			return next(err);
-		}
-
-		npm.config.set('spin', false);
-
-		packages = packages.concat(DATABASES[server_conf.database].dependencies);
-		if (server_conf.secondary_database) {
-			packages = packages.concat(DATABASES[server_conf.secondary_database].dependencies);
-		}
-
-		npm.commands.install(packages, next);
-	});
-};
-
 function setupDefaultConfigs(next) {
 	process.stdout.write('Populating database with default configs, if not already set...\n');
-	var meta = require('./meta'),
-		defaults = require(path.join(__dirname, '../', 'install/data/defaults.json'));
+	var meta = require('./meta');
+	var defaults = require(path.join(__dirname, '../', 'install/data/defaults.json'));
 
-	async.each(Object.keys(defaults), function (key, next) {
-		meta.configs.setOnEmpty(key, defaults[key], next);
-	}, function (err) {
+	meta.configs.setOnEmpty(defaults, function (err) {
 		if (err) {
 			return next(err);
 		}
 
-		if (install.values) {
-			async.parallel([
-				async.apply(setIfPaired, 'social:twitter:key', 'social:twitter:secret'),
-				async.apply(setIfPaired, 'social:google:id', 'social:google:secret'),
-				async.apply(setIfPaired, 'social:facebook:app_id', 'social:facebook:secret')
-			], function(err) {
-				if (err) {
-					return next(err);
-				}
-				meta.configs.init(next);
-			});
-		} else {
-			meta.configs.init(next);
-		}
+		meta.configs.init(next);
 	});
-}
-
-function setIfPaired(key1, key2, callback) {
-	var meta = require('./meta');
-	if (install.values[key1] && install.values[key2]) {
-		async.parallel([
-			async.apply(meta.configs.setOnEmpty, key1, install.values[key1]),
-			async.apply(meta.configs.setOnEmpty, key2, install.values[key2])
-		], callback);
-	} else {
-		callback();
-	}
 }
 
 function enableDefaultTheme(next) {
@@ -339,6 +255,9 @@ function createAdmin(callback) {
 			type: 'string'
 		}],
 		success = function(err, results) {
+			if (err) {
+				return callback(err);
+			}
 			if (!results) {
 				return callback(new Error('aborted'));
 			}
@@ -408,6 +327,32 @@ function createAdmin(callback) {
 	}
 }
 
+function createGlobalModeratorsGroup(next) {
+	var groups = require('./groups');
+	async.waterfall([
+		function (next) {
+			groups.exists('Global Moderators', next);
+		},
+		function (exists, next) {
+			if (exists) {
+				winston.info('Global Moderators group found, skipping creation!');
+				return next(null, null);
+			}
+			groups.create({
+				name: 'Global Moderators',
+				userTitle: 'Global Moderator',
+				description: 'Forum wide moderators',
+				hidden: 0,
+				private: 1,
+				disableJoinRequests: 1
+			}, next);
+		},
+		function (groupData, next) {
+			groups.show('Global Moderators', next);
+		}
+	], next);
+}
+
 function createCategories(next) {
 	var Categories = require('./categories');
 
@@ -460,10 +405,15 @@ function createWelcomePost(next) {
 			db.getObjectField('global', 'topicCount', next);
 		}
 	], function(err, results) {
+		if (err) {
+			return next(err);
+		}
+
 		var content = results[0],
 			numTopics = results[1];
 
 		if (!parseInt(numTopics, 10)) {
+			process.stdout.write('Creating welcome post!\n');
 			Topics.post({
 				uid: 1,
 				cid: 2,
@@ -477,7 +427,6 @@ function createWelcomePost(next) {
 }
 
 function enableDefaultPlugins(next) {
-	var Plugins = require('./plugins');
 
 	process.stdout.write('Enabling default plugins\n');
 
@@ -488,7 +437,8 @@ function enableDefaultPlugins(next) {
 			'nodebb-widget-essentials',
 			'nodebb-rewards-essentials',
 			'nodebb-plugin-soundpack-default',
-			'nodebb-plugin-emoji-extended'
+			'nodebb-plugin-emoji-extended',
+			'nodebb-plugin-emoji-one'
 		],
 		customDefaults = nconf.get('defaultPlugins');
 
@@ -550,6 +500,7 @@ install.setup = function (callback) {
 		enableDefaultTheme,
 		createCategories,
 		createAdministrator,
+		createGlobalModeratorsGroup,
 		createMenuItems,
 		createWelcomePost,
 		enableDefaultPlugins,

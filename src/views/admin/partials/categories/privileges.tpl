@@ -8,7 +8,13 @@
 						<!-- IF privileges.users.length -->
 						<!-- BEGIN privileges.users -->
 						<tr data-uid="{privileges.users.uid}">
-							<td><img src="{privileges.users.picture}" title="{privileges.users.username}" /></td>
+							<td>
+								<!-- IF ../picture -->
+								<img class="avatar avatar-sm" src="{privileges.users.picture}" title="{privileges.users.username}" />
+								<!-- ELSE -->
+								<div class="avatar avatar-sm" style="background-color: {../icon:bgColor};">{../icon:text}</div>
+								<!-- ENDIF ../picture -->
+							</td>
 							<td>{privileges.users.username}</td>
 							{function.spawnPrivilegeStates, privileges.users.username, privileges}
 						</tr>
@@ -35,7 +41,6 @@
 							<th class="text-center">{privileges.labels.groups.name}</th>
 							<!-- END privileges.labels.groups -->
 						</tr>
-						<!-- IF privileges.groups.length -->
 						<!-- BEGIN privileges.groups -->
 						<tr data-group-name="{privileges.groups.name}" data-private="<!-- IF privileges.groups.isPrivate -->1<!-- ELSE -->0<!-- ENDIF privileges.groups.isPrivate -->">
 							<td>
@@ -50,17 +55,13 @@
 						<!-- END privileges.groups -->
 						<tr>
 							<td colspan="{privileges.columnCount}">
-								<button type="button" class="btn btn-primary pull-right" data-ajaxify="false" data-action="search.group"> Add Group</button>
+								<div class="btn-toolbar">
+									<button type="button" class="btn btn-primary pull-right" data-ajaxify="false" data-action="search.group"> Add Group</button>
+									<button type="button" class="btn btn-info pull-right" data-ajaxify="false" data-action="copyToChildren"> Copy to Children</button>
+									<button type="button" class="btn btn-info pull-right" data-ajaxify="fakse" data-action="copyPrivilegesFrom"> Copy From Category</button>
+								</div>
 							</td>
 						</tr>
-						<!-- ELSE -->
-						<tr>
-							<td colspan="{privileges.columnCount}">
-								<button type="button" class="btn btn-primary pull-right" data-ajaxify="false" data-action="search.group"> Add Group</button>
-								No group-specific privileges in this category.
-							</td>
-						</tr>
-						<!-- ENDIF privileges.groups.length -->
 					</table>
 					<div class="help-block">
 						If the <code>registered-users</code> group is granted a specific privilege, all other groups receive an

@@ -1,12 +1,13 @@
 'use strict';
 
-var	async = require('async'),
+var	async = require('async');
 
-	plugins = require('./plugins'),
-	db = require('./database'),
-	topics = require('./topics'),
-	privileges = require('./privileges'),
-	utils = require('../public/src/utils');
+var groups = require('./groups');
+var plugins = require('./plugins');
+var db = require('./database');
+var topics = require('./topics');
+var privileges = require('./privileges');
+var meta = require('./meta');
 
 (function(User) {
 
@@ -19,6 +20,7 @@ var	async = require('async'),
 	require('./user/auth')(User);
 	require('./user/create')(User);
 	require('./user/posts')(User);
+	require('./user/topics')(User);
 	require('./user/categories')(User);
 	require('./user/follow')(User);
 	require('./user/profile')(User);
@@ -31,15 +33,15 @@ var	async = require('async'),
 	require('./user/approval')(User);
 	require('./user/invite')(User);
 	require('./user/password')(User);
+	require('./user/info')(User);
 
 	User.updateLastOnlineTime = function(uid, callback) {
 		callback = callback || function() {};
-		User.getUserFields(uid, ['status', 'lastonline'], function(err, userData) {
+		db.getObjectFields('user:' + uid, ['status', 'lastonline'], function(err, userData) {
 			var now = Date.now();
 			if (err || userData.status === 'offline' || now - parseInt(userData.lastonline, 10) < 300000) {
 				return callback(err);
 			}
-
 			User.setUserField(uid, 'lastonline', now, callback);
 		});
 	};
@@ -70,7 +72,7 @@ var	async = require('async'),
 		if (set === 'users:online') {
 			var count = parseInt(stop, 10) === -1 ? stop : stop - start + 1;
 			var now = Date.now();
-			db.getSortedSetRevRangeByScore(set, start, count, now, now - 300000, callback);
+			db.getSortedSetRevRangeByScore(set, start, count, '+inf', now - 300000, callback);
 		} else {
 			db.getSortedSetRevRange(set, start, stop, callback);
 		}
@@ -87,9 +89,7 @@ var	async = require('async'),
 		], callback);
 	};
 
-	User.getUsers = function(uids, uid, callback) {
-		var fields = ['uid', 'username', 'userslug', 'picture', 'status', 'banned', 'joindate', 'postcount', 'reputation', 'email:confirmed', 'lastonline'];
-
+	User.getUsersWithFields = function(uids, fields, uid, callback) {
 		async.waterfall([
 			function (next) {
 				plugins.fireHook('filter:users.addFields', {fields: fields}, next);
@@ -112,9 +112,10 @@ var	async = require('async'),
 				results.userData.forEach(function(user, index) {
 					if (user) {
 						user.status = User.getStatus(user);
-						user.joindateISO = utils.toISOString(user.joindate);
 						user.administrator = results.isAdmin[index];
 						user.banned = parseInt(user.banned, 10) === 1;
+						user.banned_until = parseInt(user['banned:expire'], 10) || 0;
+						user.banned_until_readable = user.banned_until ? new Date(user.banned_until).toString() : 'Not Banned';
 						user['email:confirmed'] = parseInt(user['email:confirmed'], 10) === 1;
 					}
 				});
@@ -126,19 +127,40 @@ var	async = require('async'),
 		], callback);
 	};
 
+	User.getUsers = function(uids, uid, callback) {
+		var fields = ['uid', 'username', 'userslug', 'picture', 'status', 'flags',
+			'banned', 'banned:expire', 'joindate', 'postcount', 'reputation', 'email:confirmed', 'lastonline'];
+
+		User.getUsersWithFields(uids, fields, uid, callback);
+	};
+
 	User.getStatus = function(userData) {
-		var isOnline = Date.now() - parseInt(userData.lastonline, 10) < 300000;
+		var isOnline = (Date.now() - parseInt(userData.lastonline, 10)) < 300000;
 		return isOnline ? (userData.status || 'online') : 'offline';
 	};
 
 	User.isOnline = function(uid, callback) {
-		db.sortedSetScore('users:online', uid, function(err, lastonline) {
-			if (err) {
-				return callback(err);
-			}
-			var isOnline = Date.now() - parseInt(lastonline, 10) < 300000;
-			callback(null, isOnline);
-		});
+		if (Array.isArray(uid)) {
+			db.sortedSetScores('users:online', uid, function(err, lastonline) {
+				if (err) {
+					return callback(err);
+				}
+				var now = Date.now();
+				var isOnline = uid.map(function(uid, index) {
+					return now - lastonline[index] < 300000;
+				});
+				callback(null, isOnline);
+			});
+		} else {
+			db.sortedSetScore('users:online', uid, function(err, lastonline) {
+				if (err) {
+					return callback(err);
+				}
+				var isOnline = Date.now() - parseInt(lastonline, 10) < 300000;
+				callback(null, isOnline);
+			});
+		}
+
 	};
 
 	User.exists = function(uid, callback) {
@@ -215,6 +237,19 @@ var	async = require('async'),
 		privileges.users.isAdministrator(uid, callback);
 	};
 
+	User.isGlobalModerator = function(uid, callback) {
+		privileges.users.isGlobalModerator(uid, callback);
+	};
+
+	User.isAdminOrGlobalMod = function(uid, callback) {
+		async.parallel({
+			isAdmin: async.apply(User.isAdministrator, uid),
+			isGlobalMod: async.apply(User.isGlobalModerator, uid)
+		}, function(err, results) {
+			callback(err, results ? (results.isAdmin || results.isGlobalMod) : false);
+		});
+	};
+
 	User.isAdminOrSelf = function(callerUid, uid, callback) {
 		if (parseInt(callerUid, 10) === parseInt(uid, 10)) {
 			return callback();
@@ -227,6 +262,47 @@ var	async = require('async'),
 		});
 	};
 
+	User.getAdminsandGlobalMods = function(callback) {
+		async.parallel({
+			admins: async.apply(groups.getMembers, 'administrators', 0, -1),
+			mods: async.apply(groups.getMembers, 'Global Moderators', 0, -1)
+		}, function(err, results) {
+			if (err) {
+				return callback(err);
+			}
+			var uids = results.admins.concat(results.mods).filter(function(uid, index, array) {
+				return uid && array.indexOf(uid) === index;
+			});
+			User.getUsersData(uids, callback);
+		});
+	};
+
+	User.addInterstitials = function(callback) {
+		plugins.registerHook('core', {
+			hook: 'filter:register.interstitial',
+			method: function(data, callback) {
+				if (meta.config.termsOfUse && !data.userData.acceptTos) {
+					data.interstitials.push({
+						template: 'partials/acceptTos',
+						data: {
+							termsOfUse: meta.config.termsOfUse
+						},
+						callback: function(userData, formData, next) {
+							if (formData['agree-terms'] === 'on') {
+								userData.acceptTos = true;
+							}
+
+							next(userData.acceptTos ? null : new Error('[[register:terms_of_use_error]]'));
+						}
+					});
+				}
+
+				callback(null, data);
+			}
+		});
+
+		callback();
+	};
+
 
 }(exports));
-

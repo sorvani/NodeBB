@@ -1,3 +1,32 @@
+.define-if-not-set() {
+	@gray-base:              #000;
+	@gray-darker:            lighten(@gray-base, 13.5%); // #222
+	@gray-dark:              lighten(@gray-base, 20%);   // #333
+	@gray:                   lighten(@gray-base, 33.5%); // #555
+	@gray-light:             lighten(@gray-base, 46.7%); // #777
+	@gray-lighter:           lighten(@gray-base, 93.5%); // #eee
+
+	@brand-primary:         darken(#428bca, 6.5%); // #337ab7
+	@brand-success:         #5cb85c;
+	@brand-info:            #5bc0de;
+	@brand-warning:         #f0ad4e;
+	@brand-danger:          #d9534f;
+}
+
+.define-if-not-set();
+
+#move_thread_modal .category-list {
+	height: 500px;
+	overflow-y: auto;
+	overflow-x: hidden;
+}
+
+.topic-watch-dropdown {
+	.help-text {
+		margin-left: 20px;
+	}
+}
+
 .category-list {
 	padding: 0;
 
@@ -29,8 +58,7 @@
 			background: #eee;
 		}
 
-		img, .user-icon {
-			.user-icon-style(36px, 1.8rem);
+		.avatar  {
 			float: left;
 			margin-right: 1rem;
 		}
@@ -54,4 +82,45 @@
 		height: 100%;
 		vertical-align: middle;
 	}
+}
+
+.avatar {
+	/* Contains the user icon class as a mixin, so there's no need to include that in the template */
+	.user-icon;
+
+	&.avatar-sm {
+		width: 24px;
+		height: 24px;
+		.user-icon-style(24px, 1.5rem);
+	}
+
+	&.avatar-md {
+		width: 32px;
+		height: 32px;
+		.user-icon-style(32px, 1.5rem);
+	}
+
+	&.avatar-lg {
+		width: 128px;
+		height: 128px;
+		.user-icon-style(128px, 7.5rem);
+	}
+
+	&.avatar-rounded {
+		border-radius: 50%;
+	}
+}
+
+.ban-modal {
+	.form-inline, .form-group {
+		width: 100%;
+	}
+
+	.units {
+		line-height: 5rem;
+	}
+}
+
+.admin .ban-modal .units {
+	line-height: 1.846;
 }

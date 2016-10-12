@@ -1,16 +1,16 @@
 "use strict";
+/*global app, bootbox, templates, socket, config, RELATIVE_PATH*/
 
 var ajaxify = ajaxify || {};
 
 $(document).ready(function() {
+	var location = document.location || window.location;
+	var rootUrl = location.protocol + '//' + (location.hostname || location.host) + (location.port ? ':' + location.port : '');
+	var apiXHR = null;
 
-	/*global app, templates, utils, socket, config, RELATIVE_PATH*/
-
-	var location = document.location || window.location,
-		rootUrl = location.protocol + '//' + (location.hostname || location.host) + (location.port ? ':' + location.port : ''),
-		apiXHR = null,
-
-		translator;
+	var translator;
+	var retry = true;
+	var previousBodyClass = '';
 
 	// Dumb hack to fool ajaxify into thinking translator is still a global
 	// When ajaxify is migrated to a require.js module, then this can be merged into the "define" call
@@ -21,10 +21,16 @@ $(document).ready(function() {
 	$(window).on('popstate', function (ev) {
 		ev = ev.originalEvent;
 
-		if (ev !== null && ev.state && ev.state.url !== undefined) {
-			ajaxify.go(ev.state.url, function() {
-				$(window).trigger('action:popstate', {url: ev.state.url});
-			}, true);
+		if (ev !== null && ev.state) {
+			if (ev.state.url === null && ev.state.returnPath !== undefined) {
+				window.history.replaceState({
+					url: ev.state.returnPath
+				}, ev.state.returnPath, config.relative_path + '/' + ev.state.returnPath);
+			} else if (ev.state.url !== undefined) {
+				ajaxify.go(ev.state.url, function() {
+					$(window).trigger('action:popstate', {url: ev.state.url});
+				}, true);
+			}
 		}
 	});
 
@@ -54,16 +60,32 @@ $(document).ready(function() {
 			apiXHR.abort();
 		}
 
-		url = ajaxify.start(url, quiet);
+		if (!window.location.pathname.match(/\/(403|404)$/g)) {
+			app.previousUrl = window.location.href;
+		}
 
-		$('body').removeClass(ajaxify.data.bodyClass);
+		url = ajaxify.start(url);
+
+		// If any listeners alter url and set it to an empty string, abort the ajaxification
+		if (url === null) {
+			$(window).trigger('action:ajaxify.end', {url: url, tpl_url: ajaxify.data.template.name, title: ajaxify.data.title});
+			return false;
+		}
+
+		previousBodyClass = ajaxify.data.bodyClass;
 		$('#footer, #content').removeClass('hide').addClass('ajaxifying');
 
 		ajaxify.loadData(url, function(err, data) {
+
+			if (!err || (err && err.data && (parseInt(err.data.status, 10) !== 302 && parseInt(err.data.status, 10) !== 308))) {
+				ajaxify.updateHistory(url, quiet);
+			}
+
 			if (err) {
 				return onAjaxError(err, url, callback, quiet);
 			}
 
+			retry = true;
 			app.template = data.template.name;
 
 			require(['translator'], function(translator) {
@@ -77,9 +99,10 @@ $(document).ready(function() {
 
 	ajaxify.handleRedirects = function(url) {
 		url = ajaxify.removeRelativePath(url.replace(/\/$/, '')).toLowerCase();
-		var isAdminRoute = url.startsWith('admin') && window.location.pathname.indexOf(RELATIVE_PATH + '/admin') !== 0;
+		var isClientToAdmin = url.startsWith('admin') && window.location.pathname.indexOf(RELATIVE_PATH + '/admin') !== 0;
+		var isAdminToClient = !url.startsWith('admin') && window.location.pathname.indexOf(RELATIVE_PATH + '/admin') === 0;
 		var uploadsOrApi = url.startsWith('uploads') || url.startsWith('api');
-		if (isAdminRoute || uploadsOrApi) {
+		if (isClientToAdmin || isAdminToClient || uploadsOrApi) {
 			window.open(RELATIVE_PATH + '/' + url, '_top');
 			return true;
 		}
@@ -87,46 +110,54 @@ $(document).ready(function() {
 	};
 
 
-	ajaxify.start = function(url, quiet) {
+	ajaxify.start = function(url) {
 		url = ajaxify.removeRelativePath(url.replace(/^\/|\/$/g, ''));
 
-		$(window).trigger('action:ajaxify.start', {url: url});
-
-		if (!window.location.pathname.match(/\/(403|404)$/g)) {
-			app.previousUrl = window.location.href;
+		var payload = {
+			url: url
 		}
 
-		ajaxify.currentPage = url;
+		$(window).trigger('action:ajaxify.start', payload);
 
+		return payload.url;
+	};
+
+	ajaxify.updateHistory = function(url, quiet) {
+		ajaxify.currentPage = url.split(/[?#]/)[0];
 		if (window.history && window.history.pushState) {
 			window.history[!quiet ? 'pushState' : 'replaceState']({
 				url: url
 			}, url, RELATIVE_PATH + '/' + url);
 		}
-		return url;
 	};
 
 	function onAjaxError(err, url, callback, quiet) {
-		var data = err.data,
-			textStatus = err.textStatus;
+		var data = err.data;
+		var textStatus = err.textStatus;
 
 		if (data) {
 			var status = parseInt(data.status, 10);
 			if (status === 403 || status === 404 || status === 500 || status === 502 || status === 503) {
+				if (status === 502 && retry) {
+					retry = false;
+					return ajaxify.go(url, callback, quiet);
+				}
 				if (status === 502) {
 					status = 500;
 				}
 				if (data.responseJSON) {
 					data.responseJSON.config = config;
 				}
+
 				$('#footer, #content').removeClass('hide').addClass('ajaxifying');
-				return renderTemplate(url, status.toString(), data.responseJSON, callback);
+				return renderTemplate(url, status.toString(), data.responseJSON || {}, callback);
 			} else if (status === 401) {
 				app.alertError('[[global:please_log_in]]');
 				app.previousUrl = url;
-				return ajaxify.go('login');
+				window.location.href = config.relative_path + '/login';
+				return;
 			} else if (status === 302 || status === 308) {
-				if (data.responseJSON.external) {
+				if (data.responseJSON && data.responseJSON.external) {
 					window.location.href = data.responseJSON.external;
 				} else if (typeof data.responseJSON === 'string') {
 					ajaxify.go(data.responseJSON.slice(1), callback, quiet);
@@ -142,7 +173,8 @@ $(document).ready(function() {
 
 		templates.parse(tpl_url, data, function(template) {
 			translator.translate(template, function(translatedTemplate) {
-				$('body').addClass(data.bodyClass);
+				translatedTemplate = translator.unescape(translatedTemplate);
+				$('body').removeClass(previousBodyClass).addClass(data.bodyClass);
 				$('#content').html(translatedTemplate);
 
 				ajaxify.end(url, tpl_url);
@@ -161,12 +193,10 @@ $(document).ready(function() {
 	ajaxify.end = function(url, tpl_url) {
 		function done() {
 			if (--count === 0) {
-				$(window).trigger('action:ajaxify.end', {url: url});
+				$(window).trigger('action:ajaxify.end', {url: url, tpl_url: tpl_url, title: ajaxify.data.title});
 			}
 		}
 		var count = 2;
-
-		ajaxify.variables.parse();
 
 		ajaxify.loadScript(tpl_url, done);
 
@@ -177,6 +207,14 @@ $(document).ready(function() {
 		app.processPage();
 	};
 
+	ajaxify.parseData = function() {
+		var dataEl = $('#ajaxify-data');
+		if (dataEl.length) {
+			ajaxify.data = JSON.parse(dataEl.text());
+			dataEl.remove();
+		}
+	};
+
 	ajaxify.removeRelativePath = function(url) {
 		if (url.startsWith(RELATIVE_PATH.slice(1))) {
 			url = url.slice(RELATIVE_PATH.length);
@@ -184,18 +222,24 @@ $(document).ready(function() {
 		return url;
 	};
 
-	ajaxify.refresh = function(e, callback) {
-		if (e && e instanceof jQuery.Event) {
-			e.preventDefault();
-		}
-
-		ajaxify.go(ajaxify.currentPage, callback, true);
+	ajaxify.refresh = function(callback) {
+		ajaxify.go(ajaxify.currentPage + window.location.search + window.location.hash, callback, true);
 	};
 
 	ajaxify.loadScript = function(tpl_url, callback) {
 		var location = !app.inAdmin ? 'forum/' : '';
 
-		require([location + tpl_url], function(script) {
+		if (tpl_url.startsWith('admin')) {
+			location = '';
+		}
+		var data = {
+			tpl_url: tpl_url,
+			scripts: [location + tpl_url]
+		};
+
+		$(window).trigger('action:script.load', data);
+
+		require(data.scripts, function(script) {
 			if (script && script.init) {
 				script.init();
 			}
@@ -260,42 +304,72 @@ $(document).ready(function() {
 			return href === undefined || href === '' || href === 'javascript:;';
 		}
 
+		var contentEl = document.getElementById('content');
+
 		// Enhancing all anchors to ajaxify...
 		$(document.body).on('click', 'a', function (e) {
-			if (this.target !== '' || (this.protocol !== 'http:' && this.protocol !== 'https:')) {
-				return;
-			} else if (hrefEmpty(this.href) || this.protocol === 'javascript:' || $(this).attr('data-ajaxify') === 'false' || $(this).attr('href') === '#') {
-				return e.preventDefault();
-			}
+			var _self = this;
+			var process = function() {
+				if (!e.ctrlKey && !e.shiftKey && !e.metaKey && e.which === 1) {
+					if (internalLink) {
+						var pathname = this.href.replace(rootUrl + RELATIVE_PATH + '/', '');
 
-			if (!e.ctrlKey && !e.shiftKey && !e.metaKey && e.which === 1) {
-				if (
-					this.host === '' ||	// Relative paths are always internal links...
-					(this.host === window.location.host && this.protocol === window.location.protocol &&	// Otherwise need to check that protocol and host match
-					(RELATIVE_PATH.length > 0 ? this.pathname.indexOf(RELATIVE_PATH) === 0 : true))	// Subfolder installs need this additional check
-				) {
-					// Internal link
-					var pathname = this.href.replace(rootUrl + RELATIVE_PATH + '/', '');
-
-					// Special handling for urls with hashes
-					if (window.location.pathname === this.pathname && this.hash.length) {
-						window.location.hash = this.hash;
-					} else {
-						if (ajaxify.go(pathname)) {
+						// Special handling for urls with hashes
+						if (window.location.pathname === this.pathname && this.hash.length) {
+							window.location.hash = this.hash;
+						} else {
+							if (ajaxify.go(pathname)) {
+								e.preventDefault();
+							}
+						}
+					} else if (window.location.pathname !== '/outgoing') {
+						if (config.openOutgoingLinksInNewTab && $.contains(contentEl, this)) {
+							window.open(this.href, '_blank');
+							e.preventDefault();
+						} else if (config.useOutgoingLinksPage) {
+							ajaxify.go('outgoing?url=' + encodeURIComponent(this.href));
 							e.preventDefault();
 						}
 					}
-				} else if (window.location.pathname !== '/outgoing') {
-					// External Link
-					if (config.openOutgoingLinksInNewTab) {
-						window.open(this.href, '_blank');
-						e.preventDefault();
-					} else if (config.useOutgoingLinksPage) {
-						ajaxify.go('outgoing?url=' + encodeURIComponent(this.href));
-						e.preventDefault();
-					}
+				}
+			};
+
+			if (this.target !== '' || (this.protocol !== 'http:' && this.protocol !== 'https:')) {
+				return;
+			}
+
+			var internalLink = utils.isInternalURI(this, window.location, RELATIVE_PATH);
+
+			if ($(this).attr('data-ajaxify') === 'false') {
+				if (!internalLink) {
+					return;
+				} else {
+					return e.preventDefault();
 				}
 			}
+
+			// Default behaviour for rss feeds
+			if (internalLink && $(this).attr('href').endsWith('.rss')) {
+				return;
+			}
+
+			if (hrefEmpty(this.href) || this.protocol === 'javascript:' || $(this).attr('href') === '#') {
+				return e.preventDefault();
+			}
+
+			if (app.flags && app.flags.hasOwnProperty('_unsaved') && app.flags._unsaved === true) {
+				translator.translate('[[global:unsaved-changes]]', function(text) {
+					bootbox.confirm(text, function(navigate) {
+						if (navigate) {
+							app.flags._unsaved = false;
+							process.call(_self);
+						}
+					});
+				});
+				return e.preventDefault();
+			}
+
+			process.call(_self);
 		});
 	}
 
@@ -308,8 +382,9 @@ $(document).ready(function() {
 
 	app.load();
 
-	$('[data-template]').each(function() {
-		templates.cache[$(this).attr('data-template')] = $(this).html();
+	$('[type="text/tpl"][data-template]').each(function() {
+		templates.cache[$(this).attr('data-template')] = $('<div/>').html($(this).html()).text();
+		$(this).parent().remove();
 	});
 
 });

@@ -50,6 +50,7 @@
 				</span>
 			</div>
 		</div>
+
 		<div class="form-group">
 			<label for="brand:logo:url">URL</label>
 			<input id ="brand:logo:url" type="text" class="form-control" placeholder="The URL of the site logo" data-field="brand:logo:url" />
@@ -60,6 +61,17 @@
 		<div class="form-group">
 			<label for="brand:logo:alt">Alt Text</label>
 			<input id ="brand:logo:alt" type="text" class="form-control" placeholder="Alternative text for accessibility" data-field="brand:logo:alt" />
+		</div>
+
+		<div class="form-group">
+			<label for="og_image">og:image</label>
+			<div class="input-group">
+				<input id="og_image" type="text" class="form-control" placeholder="" data-field="og:image" data-action="upload" data-target="og_image" data-route="{config.relative_path}/api/admin/uploadOgImage" readonly />
+				<span class="input-group-btn">
+					<input data-action="upload" data-target="og_image" data-route="{config.relative_path}/api/admin/uploadOgImage" type="button" class="btn btn-default" value="Upload"></input>
+					<button data-action="removeOgImage" type="button" class="btn btn-default btn-danger"><i class="fa fa-times"></i></button>
+				</span>
+			</div>
 		</div>
 	</div>
 </div>
@@ -73,7 +85,7 @@
 			<div class="input-group">
 				<input id="faviconUrl" type="text" class="form-control" placeholder="favicon.ico" data-field="brand:favicon" data-action="upload" data-target="faviconUrl" data-route="{config.relative_path}/api/admin/uploadfavicon" readonly />
 				<span class="input-group-btn">
-					<input data-action="upload" data-target="faviconUrl" data-route="{config.relative_path}/api/admin/uploadfavicon" type="button" class="btn btn-default" value="Upload"></input>
+					<input data-action="upload" data-target="faviconUrl" data-route="{config.relative_path}/api/admin/uploadfavicon" data-help="0" type="button" class="btn btn-default" value="Upload"></input>
 					<button data-action="removeFavicon" type="button" class="btn btn-default btn-danger"><i class="fa fa-times"></i></button>
 				</span>
 			</div>
@@ -102,7 +114,7 @@
 </div>
 
 <div class="row">
-	<div class="col-sm-2 col-xs-12 settings-header">Miscellaneous</div>
+	<div class="col-sm-2 col-xs-12 settings-header">Outgoing Links</div>
 	<div class="col-sm-10 col-xs-12">
 		<form>
 			<div class="checkbox">
@@ -111,13 +123,6 @@
 					<span class="mdl-switch__label"><strong>Use Outgoing Links Warning Page</strong></span>
 				</label>
 			</div>
-			<div class="checkbox">
-				<label class="mdl-switch mdl-js-switch mdl-js-ripple-effect">
-					<input type="checkbox" class="mdl-switch__input" id="showSiteTitle" data-field="disableSocialButtons">
-					<span class="mdl-switch__label"><strong>Disable social buttons</strong></span>
-				</label>
-			</div>
-
 		</form>
 	</div>
 </div>

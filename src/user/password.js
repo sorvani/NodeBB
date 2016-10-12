@@ -1,5 +1,6 @@
 'use strict';
 
+var async = require('async');
 var nconf = require('nconf');
 
 var db = require('../database');
@@ -16,13 +17,25 @@ module.exports = function(User) {
 	};
 
 	User.isPasswordCorrect = function(uid, password, callback) {
-		db.getObjectField('user:' + uid, 'password', function(err, hashedPassword) {
-			if (err || !hashedPassword) {
-				return callback(err);
-			}
+		password = password || '';
+		async.waterfall([
+			function (next) {
+				db.getObjectField('user:' + uid, 'password', next);
+			},
+			function (hashedPassword, next) {
+				if (!hashedPassword) {
+					return callback(null, true);
+				}
 
-			Password.compare(password || '', hashedPassword, callback);
-		});
+				User.isPasswordValid(password, function(err) {
+					if (err) {
+						return next(err);
+					}
+
+					Password.compare(password, hashedPassword, next);
+				});
+			}
+		], callback);
 	};
 
 	User.hasPassword = function(uid, callback) {

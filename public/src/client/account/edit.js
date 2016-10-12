@@ -2,13 +2,10 @@
 
 /* globals define, ajaxify, socket, app, config, templates, bootbox */
 
-define('forum/account/edit', ['forum/account/header', 'uploader', 'translator'], function(header, uploader, translator) {
-	var AccountEdit = {},
-		uploadedPicture = '',
-		selectedImageType = '';
+define('forum/account/edit', ['forum/account/header', 'uploader', 'translator', 'components'], function(header, uploader, translator, components) {
+	var AccountEdit = {};
 
 	AccountEdit.init = function() {
-		uploadedPicture = ajaxify.data.uploadedpicture;
 
 		header.init();
 
@@ -18,7 +15,8 @@ define('forum/account/edit', ['forum/account/header', 'uploader', 'translator'],
 			$('#inputBirthday').datepicker({
 				changeMonth: true,
 				changeYear: true,
-				yearRange: '1900:+0'
+				yearRange: '1900:-5y',
+				defaultDate: '-13y'
 			});
 		});
 
@@ -36,6 +34,7 @@ define('forum/account/edit', ['forum/account/header', 'uploader', 'translator'],
 			website: $('#inputWebsite').val(),
 			birthday: $('#inputBirthday').val(),
 			location: $('#inputLocation').val(),
+			groupTitle: $('#groupTitle').val(),
 			signature: $('#inputSignature').val(),
 			aboutme: $('#inputAboutMe').val()
 		};
@@ -58,17 +57,15 @@ define('forum/account/edit', ['forum/account/header', 'uploader', 'translator'],
 	}
 
 	function updateHeader(picture) {
-		require(['components'], function(components) {
-			if (parseInt(ajaxify.data.theirid, 10) !== parseInt(ajaxify.data.yourid, 10)) {
-				return;
-			}
+		if (parseInt(ajaxify.data.theirid, 10) !== parseInt(ajaxify.data.yourid, 10)) {
+			return;
+		}
 
-			components.get('header/userpicture')[picture ? 'show' : 'hide']();
-			components.get('header/usericon')[!picture ? 'show' : 'hide']();
-			if (picture) {
-				components.get('header/userpicture').attr('src', picture);
-			}
-		});
+		components.get('header/userpicture')[picture ? 'show' : 'hide']();
+		components.get('header/usericon')[!picture ? 'show' : 'hide']();
+		if (picture) {
+			components.get('header/userpicture').attr('src', picture);
+		}
 	}
 
 	function handleImageChange() {
@@ -78,9 +75,16 @@ define('forum/account/edit', ['forum/account/header', 'uploader', 'translator'],
 				if (err) {
 					return app.alertError(err.message);
 				}
+
+				// boolean to signify whether an uploaded picture is present in the pictures list
+				var uploaded = pictures.reduce(function(memo, cur) {
+					return memo || cur.type === 'uploaded';
+				}, false);
+
 				templates.parse('partials/modals/change_picture_modal', {
 					pictures: pictures,
-					uploaded: !!ajaxify.data.uploadedpicture
+					uploaded: uploaded,
+					allowProfileImageUploads: ajaxify.data.allowProfileImageUploads
 				}, function(html) {
 					translator.translate(html, function(html) {
 						var modal = bootbox.dialog({
@@ -102,12 +106,15 @@ define('forum/account/edit', ['forum/account/header', 'uploader', 'translator'],
 						});
 
 						modal.on('shown.bs.modal', updateImages);
-						modal.on('click', '.list-group-item', selectImageType);
+						modal.on('click', '.list-group-item', function selectImageType() {
+							modal.find('.list-group-item').removeClass('active');
+							$(this).addClass('active');
+						});
+
 						handleImageUpload(modal);
 
 						function updateImages() {
-							var currentPicture = $('#user-current-picture').attr('src'),
-								userIcon = modal.find('.user-icon');
+							var userIcon = modal.find('.user-icon');
 
 							userIcon
 								.css('background-color', ajaxify.data['icon:bgColor'])
@@ -121,24 +128,19 @@ define('forum/account/edit', ['forum/account/header', 'uploader', 'translator'],
 									if (this.getAttribute('src') === ajaxify.data.picture) {
 										$(this).parents('.list-group-item').addClass('active');
 									}
-								})
+								});
 							}
 						}
 
-						function selectImageType() {
-							modal.find('.list-group-item').removeClass('active');
-							$(this).addClass('active');
-						}
-
 						function saveSelection() {
-							var type = modal.find('.list-group-item.active').attr('data-type'),
-								src = modal.find('.list-group-item.active img').attr('src');
+							var type = modal.find('.list-group-item.active').attr('data-type');
+
 							changeUserPicture(type, function(err) {
 								if (err) {
 									return app.alertError(err.message);
 								}
 
-								updateHeader(type === 'default' ? '' : src);
+								updateHeader(type === 'default' ? '' : modal.find('.list-group-item.active img').attr('src'));
 								ajaxify.refresh();
 							});
 						}
@@ -168,8 +170,10 @@ define('forum/account/edit', ['forum/account/header', 'uploader', 'translator'],
 					} else {
 						socket.emit('user.deleteAccount', {}, function(err) {
 							if (err) {
-								app.alertError(err.message);
+								return app.alertError(err.message);
 							}
+
+							window.location.href = config.relative_path + '/';
 						});
 					}
 				});
@@ -184,22 +188,38 @@ define('forum/account/edit', ['forum/account/header', 'uploader', 'translator'],
 
 	function handleImageUpload(modal) {
 		function onUploadComplete(urlOnServer) {
-			urlOnServer = urlOnServer + '?' + new Date().getTime();
+			urlOnServer = urlOnServer + '?' + Date.now();
 
-			$('#user-current-picture').attr('src', urlOnServer);
 			updateHeader(urlOnServer);
-			uploadedPicture = urlOnServer;
+
+			if (ajaxify.data.picture.length) {
+				$('#user-current-picture, img.avatar').attr('src', urlOnServer);
+				ajaxify.data.uploadedpicture = urlOnServer;
+			} else {
+				ajaxify.refresh(function() {
+					$('#user-current-picture, img.avatar').attr('src', urlOnServer);
+				});
+			}
 		}
 
-		function onRemoveComplete(urlOnServer) {
-			$('#user-current-picture').attr('src', urlOnServer);
-			updateHeader(urlOnServer);
-			uploadedPicture = '';
+		function onRemoveComplete() {
+			if (ajaxify.data.uploadedpicture === ajaxify.data.picture) {
+				ajaxify.refresh();
+				updateHeader();
+			}
 		}
 
 		modal.find('[data-action="upload"]').on('click', function() {
 			modal.modal('hide');
-			uploader.open(config.relative_path + '/api/user/' + ajaxify.data.userslug + '/uploadpicture', {}, config.maximumProfileImageSize, function(imageUrlOnServer) {
+
+			uploader.show({
+				route: config.relative_path + '/api/user/' + ajaxify.data.userslug + '/uploadpicture',
+				params: {},
+				fileSize: ajaxify.data.maximumProfileImageSize,
+				title: '[[user:upload_picture]]',
+				description: '[[user:upload_a_picture]]',
+				accept: '.png,.jpg,.bmp'
+			}, function(imageUrlOnServer) {
 				onUploadComplete(imageUrlOnServer);
 			});
 
@@ -236,12 +256,12 @@ define('forum/account/edit', ['forum/account/header', 'uploader', 'translator'],
 		});
 
 		modal.find('[data-action="remove-uploaded"]').on('click', function() {
-			socket.emit('user.removeUploadedPicture', {uid: ajaxify.data.theirid}, function(err, imageUrlOnServer) {
+			socket.emit('user.removeUploadedPicture', {uid: ajaxify.data.theirid}, function(err) {
 				modal.modal('hide');
 				if (err) {
 					return app.alertError(err.message);
 				}
-				onRemoveComplete(imageUrlOnServer);
+				onRemoveComplete();
 			});
 		});
 	}
@@ -272,19 +292,19 @@ define('forum/account/edit', ['forum/account/header', 'uploader', 'translator'],
 
 	function updateSignature() {
 		var el = $('#inputSignature');
-		$('#signatureCharCountLeft').html(getCharsLeft(el, config.maximumSignatureLength));
+		$('#signatureCharCountLeft').html(getCharsLeft(el, ajaxify.data.maximumSignatureLength));
 
 		el.on('keyup change', function() {
-			$('#signatureCharCountLeft').html(getCharsLeft(el, config.maximumSignatureLength));
+			$('#signatureCharCountLeft').html(getCharsLeft(el, ajaxify.data.maximumSignatureLength));
 		});
 	}
 
 	function updateAboutMe() {
 		var el = $('#inputAboutMe');
-		$('#aboutMeCharCountLeft').html(getCharsLeft(el, config.maximumAboutMeLength));
+		$('#aboutMeCharCountLeft').html(getCharsLeft(el, ajaxify.data.maximumAboutMeLength));
 
 		el.on('keyup change', function() {
-			$('#aboutMeCharCountLeft').html(getCharsLeft(el, config.maximumAboutMeLength));
+			$('#aboutMeCharCountLeft').html(getCharsLeft(el, ajaxify.data.maximumAboutMeLength));
 		});
 	}
 

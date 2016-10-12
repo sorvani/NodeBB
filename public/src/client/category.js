@@ -8,8 +8,10 @@ define('forum/category', [
 	'forum/categoryTools',
 	'sort',
 	'components',
-	'translator'
-], function(infinitescroll, share, navigator, categoryTools, sort, components, translator) {
+	'translator',
+	'topicSelect',
+	'forum/pagination'
+], function(infinitescroll, share, navigator, categoryTools, sort, components, translator, topicSelect, pagination) {
 	var Category = {};
 
 	$(window).on('action:ajaxify.start', function(ev, data) {
@@ -57,20 +59,26 @@ define('forum/category', [
 		});
 
 		handleIgnoreWatch(cid);
+
+		$(window).trigger('action:topics.loaded', {topics: ajaxify.data.topics});
+		$(window).trigger('action:category.loaded', {cid: ajaxify.data.cid});
 	};
 
 	function handleIgnoreWatch(cid) {
-		$('.watch, .ignore').on('click', function() {
+		$('[component="category/watching"], [component="category/ignoring"]').on('click', function() {
 			var $this = $(this);
-			var command = $this.hasClass('watch') ? 'watch' : 'ignore';
+			var command = $this.attr('component') === 'category/watching' ? 'watch' : 'ignore';
 
 			socket.emit('categories.' + command, cid, function(err) {
 				if (err) {
 					return app.alertError(err.message);
 				}
 
-				$('.watch').toggleClass('hidden', command === 'watch');
-				$('.ignore').toggleClass('hidden', command === 'ignore');
+				$('[component="category/watching/menu"]').toggleClass('hidden', command !== 'watch');
+				$('[component="category/watching/check"]').toggleClass('fa-check', command === 'watch');
+
+				$('[component="category/ignoring/menu"]').toggleClass('hidden', command !== 'ignore');
+				$('[component="category/ignoring/check"]').toggleClass('fa-check', command === 'ignore');
 
 				app.alertSuccess('[[category:' + command + '.message]]');
 			});
@@ -83,6 +91,10 @@ define('forum/category', [
 
 	Category.toBottom = function() {
 		socket.emit('categories.getTopicCount', ajaxify.data.cid, function(err, count) {
+			if (err) {
+				return app.alertError(err.message);
+			}
+
 			navigator.scrollBottom(count - 1);
 		});
 	};
@@ -188,7 +200,8 @@ define('forum/category', [
 		templates.parse('category', 'topics', {
 			privileges: {editable: editable},
 			showSelect: editable,
-			topics: [topic]
+			topics: [topic],
+			template: {category: true}
 		}, function(html) {
 			translator.translate(html, function(translatedHTML) {
 				var topic = $(translatedHTML),
@@ -254,16 +267,20 @@ define('forum/category', [
 	};
 
 	function loadTopicsAfter(after, direction, callback) {
+		callback = callback || function() {};
 		if (!utils.isNumber(after) || (after === 0 && components.get('category/topic', 'index', 0).length)) {
-			return;
+			return callback();
 		}
 
 		$(window).trigger('action:categories.loading');
+		var params = utils.params();
 		infinitescroll.loadMore('categories.loadMore', {
 			cid: ajaxify.data.cid,
 			after: after,
 			direction: direction,
-			author: utils.params().author
+			author: params.author,
+			tag: params.tag,
+			categoryTopicSort: config.categoryTopicSort
 		}, function (data, done) {
 			if (data.topics && data.topics.length) {
 				Category.onTopicsLoaded(data, direction, done);
@@ -272,6 +289,7 @@ define('forum/category', [
 			}
 
 			$(window).trigger('action:categories.loaded');
+			callback();
 		});
 	}
 
@@ -322,11 +340,15 @@ define('forum/category', [
 				$('[component="category"]').append(html);
 			}
 
-			infinitescroll.removeExtra($('[component="category/topic"]'), direction, 60);
+			if (!topicSelect.getSelectedTids().length) {
+				infinitescroll.removeExtra($('[component="category/topic"]'), direction, 60);
+			}
 
 			html.find('.timeago').timeago();
 			app.createUserTooltips();
 			utils.makeNumbersHumanReadable(html.find('.human-readable-number'));
+
+			$(window).trigger('action:topics.loaded', {topics: data.topics});
 
 			callback();
 		});

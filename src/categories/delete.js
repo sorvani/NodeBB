@@ -1,17 +1,19 @@
 'use strict';
 
-var async = require('async'),
-	db = require('../database'),
-	batch = require('../batch'),
-	plugins = require('../plugins'),
-	topics = require('../topics');
+var async = require('async');
+var db = require('../database');
+var batch = require('../batch');
+var plugins = require('../plugins');
+var topics = require('../topics');
+var groups = require('../groups');
+var privileges = require('../privileges');
 
 module.exports = function(Categories) {
 
-	Categories.purge = function(cid, callback) {
+	Categories.purge = function(cid, uid, callback) {
 		batch.processSortedSet('cid:' + cid + ':tids', function(tids, next) {
 			async.eachLimit(tids, 10, function(tid, next) {
-				topics.purgePostsAndTopic(tid, next);
+				topics.purgePostsAndTopic(tid, uid, next);
 			}, next);
 		}, {alwaysStartAt: 0}, function(err) {
 			if (err) {
@@ -38,9 +40,15 @@ module.exports = function(Categories) {
 					'cid:' + cid + ':tids:posts',
 					'cid:' + cid + ':pids',
 					'cid:' + cid + ':read_by_uid',
+					'cid:' + cid + ':ignorers',
 					'cid:' + cid + ':children',
 					'category:' + cid
 				], next);
+			},
+			function(next) {
+				async.each(privileges.privilegeList, function(privilege, next) {
+					groups.destroy('cid:' + cid + ':privileges:' + privilege, next);
+				}, next);
 			}
 		], callback);
 	}
@@ -77,7 +85,7 @@ module.exports = function(Categories) {
 					}
 				], next);
 			}
-		], function(err, results) {
+		], function(err) {
 			callback(err);
 		});
 	}

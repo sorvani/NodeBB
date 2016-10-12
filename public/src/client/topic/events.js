@@ -1,21 +1,22 @@
 
 'use strict';
 
-/* globals config, app, ajaxify, define, socket, templates, translator, utils */
+/* globals config, app, ajaxify, define, socket, templates, utils */
 
 define('forum/topic/events', [
 	'forum/topic/postTools',
 	'forum/topic/threadTools',
 	'forum/topic/posts',
-	'components'
-], function(postTools, threadTools, posts, components) {
+	'components',
+	'translator'
+], function(postTools, threadTools, posts, components, translator) {
 
 	var Events = {};
 
 	var events = {
 		'event:user_status_change': onUserStatusChange,
 		'event:voted': updatePostVotesAndUserReputation,
-		'event:favourited': updateFavouriteCount,
+		'event:bookmarked': updateBookmarkCount,
 
 		'event:topic_deleted': threadTools.setDeleteState,
 		'event:topic_restored': threadTools.setDeleteState,
@@ -35,18 +36,15 @@ define('forum/topic/events', [
 		'event:post_deleted': togglePostDeleteState,
 		'event:post_restored': togglePostDeleteState,
 
-		'posts.favourite': togglePostFavourite,
-		'posts.unfavourite': togglePostFavourite,
+		'posts.bookmark': togglePostBookmark,
+		'posts.unbookmark': togglePostBookmark,
 
 		'posts.upvote': togglePostVote,
 		'posts.downvote': togglePostVote,
 		'posts.unvote': togglePostVote,
 
 		'event:new_notification': onNewNotification,
-		'event:new_post': posts.onNewPost,
-
-		'event:topic.notifyTyping': onNotifyTyping,
-		'event:topic.stopNotifyTyping': onStopNotifyTyping
+		'event:new_post': posts.onNewPost
 	};
 
 	Events.init = function() {
@@ -71,15 +69,15 @@ define('forum/topic/events', [
 	}
 
 	function updatePostVotesAndUserReputation(data) {
-		var votes = components.get('post/vote-count', data.post.pid),
-			reputationElements = $('.reputation[data-uid="' + data.post.uid + '"]');
+		var votes = components.get('post/vote-count', data.post.pid);
+		var reputationElements = $('.reputation[data-uid="' + data.post.uid + '"]');
 
 		votes.html(data.post.votes).attr('data-votes', data.post.votes);
 		reputationElements.html(data.user.reputation).attr('data-reputation', data.user.reputation);
 	}
 
-	function updateFavouriteCount(data) {
-		$('[data-pid="' + data.post.pid + '"] .favouriteCount').html(data.post.reputation).attr('data-favourites', data.post.reputation);
+	function updateBookmarkCount(data) {
+		$('[data-pid="' + data.post.pid + '"] .bookmarkCount').html(data.post.bookmarks).attr('data-bookmarks', data.post.bookmarks);
 	}
 
 	function onTopicPurged() {
@@ -98,12 +96,14 @@ define('forum/topic/events', [
 		if (!data || !data.post) {
 			return;
 		}
-		var editedPostEl = components.get('post/content', data.post.pid),
-			editorEl = $('[data-pid="' + data.post.pid + '"] [component="post/editor"]'),
-			topicTitle = components.get('topic/title'),
-			breadCrumb = components.get('breadcrumb/current');
+		var editedPostEl = components.get('post/content', data.post.pid);
+		var editorEl = $('[data-pid="' + data.post.pid + '"] [component="post/editor"]');
+		var topicTitle = components.get('topic/title');
+		var navbarTitle = components.get('navbar/title').find('span');
+		var breadCrumb = components.get('breadcrumb/current');
 
 		if (topicTitle.length && data.topic.title && topicTitle.html() !== data.topic.title) {
+			ajaxify.data.title = data.topic.title;
 			var newUrl = 'topic/' + data.topic.slug + (window.location.search ? window.location.search : '');
 			history.replaceState({url: newUrl}, null, window.location.protocol + '//' + window.location.host + config.relative_path + '/' + newUrl);
 
@@ -113,27 +113,32 @@ define('forum/topic/events', [
 			breadCrumb.fadeOut(250, function() {
 				breadCrumb.html(data.topic.title).fadeIn(250);
 			});
+			navbarTitle.fadeOut(250, function() {
+				navbarTitle.html(data.topic.title).fadeIn(250);
+			});
 		}
 
 		editedPostEl.fadeOut(250, function() {
-			editedPostEl.html(data.post.content);
+			editedPostEl.html(translator.unescape(data.post.content));
 			editedPostEl.find('img:not(.not-responsive)').addClass('img-responsive');
 			app.replaceSelfLinks(editedPostEl.find('a'));
 			posts.wrapImagesInLinks(editedPostEl.parent());
+			posts.unloadImages(editedPostEl.parent());
+			posts.loadImages();
 			editedPostEl.fadeIn(250);
-			$(window).trigger('action:posts.edited', data);
-		});
 
-		var editData = {
-			editor: data.editor,
-			relativeEditTime: utils.toISOString(data.post.edited)
-		};
+			var editData = {
+				editor: data.editor,
+				editedISO: utils.toISOString(data.post.edited)
+			};
 
-		templates.parse('partials/topic/post-editor', editData, function(html) {
-			translator.translate(html, function(translated) {
-				html = $(translated);
-				editorEl.replaceWith(html);
-				html.find('.timeago').timeago();
+			templates.parse('partials/topic/post-editor', editData, function(html) {
+				translator.translate(html, function(translated) {
+					html = $(translated);
+					editorEl.replaceWith(html);
+					html.find('.timeago').timeago();
+					$(window).trigger('action:posts.edited', data);
+				});
 			});
 		});
 
@@ -183,26 +188,27 @@ define('forum/topic/events', [
 		var isDeleted = postEl.hasClass('deleted');
 		postTools.toggle(data.pid, isDeleted);
 
-		if (!app.user.isAdmin && parseInt(data.uid, 10) !== parseInt(app.user.uid, 10)) {
+		if (!ajaxify.data.privileges.isAdminOrMod && parseInt(data.uid, 10) !== parseInt(app.user.uid, 10)) {
+			postEl.find('[component="post/tools"]').toggleClass('hidden', isDeleted);
 			if (isDeleted) {
 				postEl.find('[component="post/content"]').translateHtml('[[topic:post_is_deleted]]');
 			} else {
-				postEl.find('[component="post/content"]').html(data.content);
+				postEl.find('[component="post/content"]').html(translator.unescape(data.content));
 			}
 		}
 	}
 
-	function togglePostFavourite(data) {
-		var favBtn = $('[data-pid="' + data.post.pid + '"] [component="post/favourite"]');
+	function togglePostBookmark(data) {
+		var el = $('[data-pid="' + data.post.pid + '"] [component="post/bookmark"]');
 
-		if (!favBtn.length) {
+		if (!el.length) {
 			return;
 		}
 
-		favBtn.attr('data-favourited', data.isFavourited);
+		el.attr('data-bookmarked', data.isBookmarked);
 
-		favBtn.find('[component="post/favourite/on"]').toggleClass('hidden', !data.isFavourited);
-		favBtn.find('[component="post/favourite/off"]').toggleClass('hidden', data.isFavourited);
+		el.find('[component="post/bookmark/on"]').toggleClass('hidden', !data.isBookmarked);
+		el.find('[component="post/bookmark/off"]').toggleClass('hidden', data.isBookmarked);
 	}
 
 	function togglePostVote(data) {
@@ -214,29 +220,9 @@ define('forum/topic/events', [
 	function onNewNotification(data) {
 		var tid = ajaxify.data.tid;
 		if (data && data.tid && parseInt(data.tid, 10) === parseInt(tid, 10)) {
-			socket.emit('topics.markTopicNotificationsRead', tid);
+			socket.emit('topics.markTopicNotificationsRead', [tid]);
 		}
-	}
-
-	function onNotifyTyping(data) {
-		var userEl = $('.thread_active_users [data-uid="' + data.uid + '"]');
-		userEl.addClass('replying');
-
-		var timeoutId = userEl.attr('timeoutId');
-		if (timeoutId) {
-			clearTimeout(timeoutId);
-			timeoutId = 0;
-		}
-		timeoutId = setTimeout(function() {
-			userEl.removeClass('replying');
-		}, 7000);
-		userEl.attr('timeoutId', timeoutId);
-	}
-
-	function onStopNotifyTyping(data) {
-		$('.thread_active_users [data-uid="' + data.uid + '"]').removeClass('replying');
 	}
 
 	return Events;
-
 });

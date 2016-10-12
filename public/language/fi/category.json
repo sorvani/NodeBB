@@ -1,5 +1,5 @@
 {
-    "category": "Category",
+    "category": "Kategoria",
     "subcategories": "Subcategories",
     "new_topic_button": "Uusi aihe",
     "guest-login-post": "Kirjaudu sisään voidaksesi kirjoittaa viesti",
@@ -10,7 +10,11 @@
     "share_this_category": "Jaa tämä kategoria",
     "watch": "Watch",
     "ignore": "Sivuuta",
-    "watch.message": "You are now watching updates from this category",
-    "ignore.message": "You are now ignoring updates from this category",
+    "watching": "Watching",
+    "ignoring": "Ignoring",
+    "watching.description": "Show topics in unread",
+    "ignoring.description": "Do not show topics in unread",
+    "watch.message": "You are now watching updates from this category and all subcategories",
+    "ignore.message": "You are now ignoring updates from this category and all subcategories",
     "watched-categories": "Watched categories"
 }

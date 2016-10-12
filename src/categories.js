@@ -1,15 +1,13 @@
 
 'use strict';
 
-var async = require('async'),
-	nconf = require('nconf'),
+var async = require('async');
 
-	db = require('./database'),
-	user = require('./user'),
-	Groups = require('./groups'),
-	plugins = require('./plugins'),
-	validator = require('validator'),
-	privileges = require('./privileges');
+var db = require('./database');
+var user = require('./user');
+var Groups = require('./groups');
+var plugins = require('./plugins');
+var privileges = require('./privileges');
 
 (function(Categories) {
 
@@ -27,37 +25,45 @@ var async = require('async'),
 	};
 
 	Categories.getCategoryById = function(data, callback) {
-		Categories.getCategories([data.cid], data.uid, function(err, categories) {
-			if (err || !Array.isArray(categories) || !categories[0]) {
-				return callback(err || new Error('[[error:invalid-cid]]'));
-			}
-			var category = categories[0];
-
-			if (parseInt(data.uid, 10)) {
-				Categories.markAsRead([data.cid], data.uid);
-			}
-
-			async.parallel({
-				topics: function(next) {
-					Categories.getCategoryTopics(data, next);
-				},
-				isIgnored: function(next) {
-					Categories.isIgnored([data.cid], data.uid, next);
+		var category;
+		async.waterfall([
+			function (next) {
+				Categories.getCategories([data.cid], data.uid, next);
+			},
+			function (categories, next) {
+				if (!Array.isArray(categories) || !categories[0]) {
+					return next(new Error('[[error:invalid-cid]]'));
 				}
-			}, function(err, results) {
-				if(err) {
-					return callback(err);
-				}
+				category = categories[0];
 
+				async.parallel({
+					topics: function(next) {
+						Categories.getCategoryTopics(data, next);
+					},
+					topicCount: function(next) {
+						if (Array.isArray(data.set)) {
+							db.sortedSetIntersectCard(data.set, next);
+						} else {
+							next(null, category.topic_count);
+						}
+					},
+					isIgnored: function(next) {
+						Categories.isIgnored([data.cid], data.uid, next);
+					}
+				}, next);
+			},
+			function (results, next) {
 				category.topics = results.topics.topics;
 				category.nextStart = results.topics.nextStart;
 				category.isIgnored = results.isIgnored[0];
+				category.topic_count = results.topicCount;
 
-				plugins.fireHook('filter:category.get', {category: category, uid: data.uid}, function(err, data) {
-					callback(err, data ? data.category : null);
-				});
-			});
-		});
+				plugins.fireHook('filter:category.get', {category: category, uid: data.uid}, next);
+			},
+			function (data, next) {
+				next(null, data.category);
+			}
+		], callback);
 	};
 
 	Categories.isIgnored = function(cids, uid, callback) {
@@ -291,7 +297,7 @@ var async = require('async'),
 
 		for (i; i < len; ++i) {
 			category = categories[i];
-			if (!category.hasOwnProperty('parentCid')) {
+			if (!category.hasOwnProperty('parentCid') || category.parentCid === null) {
 				category.parentCid = 0;
 			}
 
@@ -303,5 +309,57 @@ var async = require('async'),
 
 		return tree;
 	};
+
+	Categories.buildForSelect = function(uid, callback) {
+		function recursive(category, categoriesData, level) {
+			if (category.link) {
+				return;
+			}
+
+			var bullet = level ? '&bull; ' : '';
+			category.value = category.cid;
+			category.text = level + bullet + category.name
+			categoriesData.push(category);
+
+			category.children.forEach(function(child) {
+				recursive(child, categoriesData, '&nbsp;&nbsp;&nbsp;&nbsp;' + level);
+			});
+		}
+		Categories.getCategoriesByPrivilege('cid:0:children', uid, 'read', function(err, categories) {
+			if (err) {
+				return callback(err);
+			}
+
+			var categoriesData = [];
+
+			categories = categories.filter(function(category) {
+				return category && !category.link && !parseInt(category.parentCid, 10);
+			});
+
+			categories.forEach(function(category) {
+				recursive(category, categoriesData, '');
+			});
+			callback(null, categoriesData);
+		});
+	};
+
+	Categories.getIgnorers = function(cid, start, stop, callback) {
+		db.getSortedSetRevRange('cid:' + cid + ':ignorers', start, stop, callback);
+	};
+
+	Categories.filterIgnoringUids = function(cid, uids, callback) {
+		async.waterfall([
+			function (next){
+				db.sortedSetScores('cid:' + cid + ':ignorers', uids, next);
+			},
+			function (scores, next) {
+				var readingUids = uids.filter(function(uid, index) {
+					return uid && !!scores[index];
+				});
+				next(null, readingUids);
+			}
+		], callback);
+	};
+
 
 }(exports));

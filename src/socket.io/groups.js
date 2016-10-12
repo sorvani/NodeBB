@@ -5,6 +5,7 @@ var	async = require('async'),
 	groups = require('../groups'),
 	meta = require('../meta'),
 	user = require('../user'),
+	utils = require('../../public/src/utils'),
 	groupsController = require('../controllers/groups'),
 
 	SocketGroups = {};
@@ -22,6 +23,10 @@ SocketGroups.join = function(socket, data, callback) {
 		return callback(new Error('[[error:invalid-uid]]'));
 	}
 
+	if (data.groupName === 'administrators' || groups.isPrivilegeGroup(data.groupName)) {
+		return callback(new Error('[[error:not-allowed]]'));
+	}
+
 	groups.exists(data.groupName, function(err, exists) {
 		if (err || !exists) {
 			return callback(err || new Error('[[error:no-group]]'));
@@ -33,16 +38,20 @@ SocketGroups.join = function(socket, data, callback) {
 
 		async.parallel({
 			isAdmin: async.apply(user.isAdministrator, socket.uid),
-			isPrivate: async.apply(groups.isPrivate, data.groupName)
-		}, function(err, checks) {
+			groupData: async.apply(groups.getGroupData, data.groupName)
+		}, function(err, results) {
 			if (err) {
 				return callback(err);
 			}
 
-			if (checks.isPrivate && !checks.isAdmin) {
-				groups.requestMembership(data.groupName, socket.uid, callback);
-			} else {
+			if (results.groupData.private && results.groupData.disableJoinRequests) {
+				return callback(new Error('[[error:join-requests-disabled]]'));
+			}
+
+			if (!results.groupData.private || results.isAdmin) {
 				groups.join(data.groupName, socket.uid, callback);
+			} else {
+				groups.requestMembership(data.groupName, socket.uid, callback);
 			}
 		});
 	});
@@ -126,6 +135,28 @@ SocketGroups.issueInvite = isOwner(function(socket, data, callback) {
 	groups.invite(data.groupName, data.toUid, callback);
 });
 
+SocketGroups.issueMassInvite = isOwner(function(socket, data, callback) {
+	if (!data || !data.usernames || !data.groupName) {
+		return callback(new Error('[[error:invalid-data]]'));
+	}
+	var usernames = data.usernames.split(',');
+	usernames = usernames.map(function(username) {
+		return username && username.trim();
+	});
+	user.getUidsByUsernames(usernames, function(err, uids) {
+		if (err) {
+			return callback(err);
+		}
+		uids = uids.filter(function(uid) {
+			return !!uid && parseInt(uid, 10);
+		});
+
+		async.eachSeries(uids, function(uid, next) {
+			groups.invite(data.groupName, uid, next);
+		}, callback);
+	});
+});
+
 SocketGroups.rescindInvite = isOwner(function(socket, data, callback) {
 	groups.rejectMembership(data.groupName, data.toUid, callback);
 });
@@ -144,15 +175,26 @@ SocketGroups.update = isOwner(function(socket, data, callback) {
 
 
 SocketGroups.kick = isOwner(function(socket, data, callback) {
-	groups.leave(data.groupName, data.uid, callback);
-});
+	if (socket.uid === parseInt(data.uid, 10)) {
+		return callback(new Error('[[error:cant-kick-self]]'));
+	}
 
+	groups.ownership.isOwner(data.uid, data.groupName, function(err, isOwner) {
+		if (err) {
+			return callback(err);
+		}
+		groups.kick(data.uid, data.groupName, isOwner, callback);
+	});
+
+});
 
 SocketGroups.create = function(socket, data, callback) {
 	if (!socket.uid) {
 		return callback(new Error('[[error:no-privileges]]'));
 	} else if (parseInt(meta.config.allowGroupCreation, 10) !== 1) {
 		return callback(new Error('[[error:group-creation-disabled]]'));
+	} else if (groups.isPrivilegeGroup(data.name)) {
+		return callback(new Error('[[error:invalid-group-name]]'));
 	}
 
 
@@ -161,16 +203,16 @@ SocketGroups.create = function(socket, data, callback) {
 };
 
 SocketGroups.delete = function(socket, data, callback) {
-	if (data.groupName === 'administrators' || data.groupName === 'registered-users') {
+	if (data.groupName === 'administrators' ||
+		data.groupName === 'registered-users' ||
+		data.groupName === 'Global Moderators') {
 		return callback(new Error('[[error:not-allowed]]'));
 	}
 
-	var tasks = {
+	async.parallel({
 		isOwner: async.apply(groups.ownership.isOwner, socket.uid, data.groupName),
 		isAdmin: async.apply(user.isAdministrator, socket.uid)
-	};
-
-	async.parallel(tasks, function(err, checks) {
+	}, function(err, checks) {
 		if (err) {
 			return callback(err);
 		}
@@ -197,12 +239,12 @@ SocketGroups.search = function(socket, data, callback) {
 };
 
 SocketGroups.loadMore = function(socket, data, callback) {
-	if (!data.sort || !data.after) {
+	if (!data.sort  || !utils.isNumber(data.after) || parseInt(data.after, 10) < 0) {
 		return callback();
 	}
 
 	var groupsPerPage = 9;
-	var start = parseInt(data.after);
+	var start = parseInt(data.after, 10);
 	var stop = start + groupsPerPage - 1;
 	groupsController.getGroupsFromSet(socket.uid, data.sort, start, stop, callback);
 };
@@ -213,7 +255,7 @@ SocketGroups.searchMembers = function(socket, data, callback) {
 };
 
 SocketGroups.loadMoreMembers = function(socket, data, callback) {
-	if (!data.groupName || !parseInt(data.after, 10)) {
+	if (!data.groupName || !utils.isNumber(data.after) || parseInt(data.after, 10) < 0) {
 		return callback(new Error('[[error:invalid-data]]'));
 	}
 	data.after = parseInt(data.after, 10);
@@ -234,11 +276,11 @@ SocketGroups.cover.update = function(socket, data, callback) {
 	}
 
 	groups.ownership.isOwner(socket.uid, data.groupName, function(err, isOwner) {
-		if (!isOwner) {
-			return callback(new Error('[[error:no-privileges]]'));
+		if (err || !isOwner) {
+			return callback(err || new Error('[[error:no-privileges]]'));
 		}
 
-		groups.updateCover(data, callback);
+		groups.updateCover(socket.uid, data, callback);
 	});
 };
 
@@ -248,12 +290,12 @@ SocketGroups.cover.remove = function(socket, data, callback) {
 	}
 
 	groups.ownership.isOwner(socket.uid, data.groupName, function(err, isOwner) {
-		if (!isOwner) {
-			return callback(new Error('[[error:no-privileges]]'));
+		if (err || !isOwner) {
+			return callback(err || new Error('[[error:no-privileges]]'));
 		}
 
 		groups.removeCover(data, callback);
 	});
-}
+};
 
 module.exports = SocketGroups;

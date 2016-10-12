@@ -1,20 +1,19 @@
 'use strict';
 
-/* globals define, app, utils, socket, config */
+/* globals define, app, utils, socket, config, ajaxify, bootbox */
 
 
-define('forum/register', ['csrf', 'translator'], function(csrf, translator) {
+define('forum/register', ['translator'], function(translator) {
 	var Register = {},
 		validationError = false,
-		successIcon = '<i class="fa fa-check"></i>';
+		successIcon = '';
 
 	Register.init = function() {
 		var email = $('#email'),
 			username = $('#username'),
 			password = $('#password'),
 			password_confirm = $('#password-confirm'),
-			register = $('#register'),
-			agreeTerms = $('#agree-terms');
+			register = $('#register');
 
 		handleLanguageOverride();
 
@@ -28,7 +27,7 @@ define('forum/register', ['csrf', 'translator'], function(csrf, translator) {
 
 		var query = utils.params();
 		if (query.email && query.token) {
-			email.val(query.email);
+			email.val(decodeURIComponent(query.email));
 			$('#token').val(query.token);
 		}
 
@@ -67,55 +66,50 @@ define('forum/register', ['csrf', 'translator'], function(csrf, translator) {
 
 		register.on('click', function(e) {
 			var registerBtn = $(this);
+			var errorEl = $('#register-error-notify');
+			errorEl.addClass('hidden');
 			e.preventDefault();
 			validateForm(function() {
-				if (!validationError) {
-					registerBtn.addClass('disabled');
+				if (validationError) {
+					return;
+				}
 
-					registerBtn.parents('form').ajaxSubmit({
-						headers: {
-							'x-csrf-token': csrf.get()
-						},
-						success: function(data, status) {
-							registerBtn.removeClass('disabled');
-							if (!data) {
-								return;
-							}
-							if (data.referrer) {
-								window.location.href = data.referrer;
-							} else if (data.message) {
-								require(['translator'], function(translator) {
-									translator.translate(data.message, function(msg) {
-										bootbox.alert(msg);
-										ajaxify.go('/');
-									});
+				registerBtn.addClass('disabled');
+
+				registerBtn.parents('form').ajaxSubmit({
+					headers: {
+						'x-csrf-token': config.csrf_token
+					},
+					success: function(data) {
+						registerBtn.removeClass('disabled');
+						if (!data) {
+							return;
+						}
+						if (data.referrer) {
+							window.location.href = data.referrer;
+						} else if (data.message) {
+							require(['translator'], function(translator) {
+								translator.translate(data.message, function(msg) {
+									bootbox.alert(msg);
+									ajaxify.go('/');
 								});
-							}
-						},
-						error: function(data, status) {
-							var errorEl = $('#register-error-notify');
-							translator.translate(data.responseText, config.defaultLang, function(translated) {
-								errorEl.find('p').text(translated);
-								errorEl.show();
-								registerBtn.removeClass('disabled');
 							});
 						}
-					});
-				}
+					},
+					error: function(data) {
+						translator.translate(data.responseText, config.defaultLang, function(translated) {
+							if (data.status === 403 && data.responseText === 'Forbidden') {
+								window.location.href = config.relative_path + '/register?error=csrf-invalid';
+							} else {
+								errorEl.find('p').text(translated);
+								errorEl.removeClass('hidden');
+								registerBtn.removeClass('disabled');
+							}
+						});
+					}
+				});
 			});
 		});
-
-		if (agreeTerms.length) {
-			agreeTerms.on('click', function() {
-				if ($(this).prop('checked')) {
-					register.removeAttr('disabled');
-				} else {
-					register.attr('disabled', 'disabled');
-				}
-			});
-
-			register.attr('disabled', 'disabled');
-		}
 	};
 
 	function validateEmail(email, callback) {
@@ -150,9 +144,9 @@ define('forum/register', ['csrf', 'translator'], function(csrf, translator) {
 
 		var username_notify = $('#username-notify');
 
-		if (username.length < config.minimumUsernameLength) {
+		if (username.length < ajaxify.data.minimumUsernameLength) {
 			showError(username_notify, '[[error:username-too-short]]');
-		} else if (username.length > config.maximumUsernameLength) {
+		} else if (username.length > ajaxify.data.maximumUsernameLength) {
 			showError(username_notify, '[[error:username-too-long]]');
 		} else if (!utils.isUserNameValid(username) || !utils.slugify(username)) {
 			showError(username_notify, '[[error:invalid-username]]');
@@ -160,7 +154,7 @@ define('forum/register', ['csrf', 'translator'], function(csrf, translator) {
 			socket.emit('user.exists', {
 				username: username
 			}, function(err, exists) {
-				if(err) {
+				if (err) {
 					return app.alertError(err.message);
 				}
 
@@ -179,12 +173,16 @@ define('forum/register', ['csrf', 'translator'], function(csrf, translator) {
 		var password_notify = $('#password-notify'),
 			password_confirm_notify = $('#password-confirm-notify');
 
-		if (password.length < config.minimumPasswordLength) {
+		if (password.length < ajaxify.data.minimumPasswordLength) {
 			showError(password_notify, '[[user:change_password_error_length]]');
+		} else if (password.length > 4096) {
+			showError(password_notify, '[[error:password-too-long]]');
 		} else if (!utils.isPasswordValid(password)) {
 			showError(password_notify, '[[user:change_password_error]]');
 		} else if (password === $('#username').val()) {
 			showError(password_notify, '[[user:password_same_as_username]]');
+		} else if (password === $('#email').val()) {
+			showError(password_notify, '[[user:password_same_as_email]]');
 		} else {
 			showSuccess(password_notify, successIcon);
 		}
@@ -213,8 +211,8 @@ define('forum/register', ['csrf', 'translator'], function(csrf, translator) {
 		translator.translate(msg, function(msg) {
 			element.html(msg);
 			element.parent()
-				.removeClass('alert-success')
-				.addClass('alert-danger');
+				.removeClass('register-success')
+				.addClass('register-danger');
 			element.show();
 		});
 		validationError = true;
@@ -224,8 +222,8 @@ define('forum/register', ['csrf', 'translator'], function(csrf, translator) {
 		translator.translate(msg, function(msg) {
 			element.html(msg);
 			element.parent()
-				.removeClass('alert-danger')
-				.addClass('alert-success');
+				.removeClass('register-danger')
+				.addClass('register-success');
 			element.show();
 		});
 	}

@@ -1,23 +1,22 @@
 'use strict';
-/* globals define, app, ajaxify, socket, RELATIVE_PATH */
+/* globals define, app, config, ajaxify, socket, bootbox, templates */
 
 define('forum/account/header', [
 	'coverPhoto',
 	'uploader',
-	'components'
-], function(coverPhoto, uploader, components) {
-	var	AccountHeader = {},
-		yourid,
-		theirid;
+	'components',
+	'translator'
+], function(coverPhoto, uploader, components, translator) {
+	var AccountHeader = {};
+	var isAdminOrSelfOrGlobalMod;
 
 	AccountHeader.init = function() {
-		yourid = ajaxify.data.yourid;
-		theirid = ajaxify.data.theirid;
+		isAdminOrSelfOrGlobalMod = ajaxify.data.isAdmin || ajaxify.data.isSelf || ajaxify.data.isGlobalModerator;
 
 		hidePrivateLinks();
 		selectActivePill();
 
-		if (parseInt(yourid, 10) === parseInt(theirid, 10)) {
+		if (isAdminOrSelfOrGlobalMod) {
 			setupCoverPhoto();
 		}
 
@@ -30,7 +29,16 @@ define('forum/account/header', [
 		});
 
 		components.get('account/chat').on('click', function() {
-			app.openChat($('.account-username').html(), theirid);
+			socket.emit('modules.chats.hasPrivateChat', ajaxify.data.uid, function(err, roomId) {
+				if (err) {
+					return app.alertError(err.message);
+				}
+				if (roomId) {
+					app.openChat(roomId);
+				} else {
+					app.newChat(ajaxify.data.uid);
+				}
+			});
 		});
 
 		components.get('account/ban').on('click', banAccount);
@@ -59,13 +67,18 @@ define('forum/account/header', [
 		coverPhoto.init(components.get('account/cover'),
 			function(imageData, position, callback) {
 				socket.emit('user.updateCover', {
-					uid: yourid,
+					uid: ajaxify.data.uid,
 					imageData: imageData,
 					position: position
 				}, callback);
 			},
 			function() {
-				uploader.open(RELATIVE_PATH + '/api/user/' + ajaxify.data.userslug + '/uploadcover', { uid: yourid }, 0, function(imageUrlOnServer) {
+				uploader.show({
+					title: '[[user:upload_cover_picture]]',
+					route: config.relative_path + '/api/user/' + ajaxify.data.userslug + '/uploadcover',
+					params: {uid: ajaxify.data.uid },
+					accept: '.png,.jpg,.bmp'
+				}, function(imageUrlOnServer) {
 					components.get('account/cover').css('background-image', 'url(' + imageUrlOnServer + '?v=' + Date.now() + ')');
 				});
 			},
@@ -75,43 +88,59 @@ define('forum/account/header', [
 
 	function toggleFollow(type) {
 		socket.emit('user.' + type, {
-			uid: theirid
+			uid: ajaxify.data.uid
 		}, function(err) {
 			if (err) {
 				return app.alertError(err.message);
 			}
 
-			$('#follow-btn').toggleClass('hide', type === 'follow');
-			$('#unfollow-btn').toggleClass('hide', type === 'unfollow');
-			app.alertSuccess('[[global:alert.' + type + ', ' + $('.account-username').html() + ']]');
+			components.get('account/follow').toggleClass('hide', type === 'follow');
+			components.get('account/unfollow').toggleClass('hide', type === 'unfollow');
+			app.alertSuccess('[[global:alert.' + type + ', ' + ajaxify.data.username + ']]');
 		});
 		return false;
 	}
 
 	function banAccount() {
-		translator.translate('[[user:ban_account_confirm]]', function(translated) {
-			bootbox.confirm(translated, function(confirm) {
-				if (!confirm) {
-					return;
-				}
-				socket.emit('admin.user.banUsers', [ajaxify.data.theirid], function(err) {
-					if (err) {
-						return app.alertError(err.message);
+		templates.parse('admin/partials/temporary-ban', {}, function(html) {
+			bootbox.dialog({
+				className: 'ban-modal',
+				title: '[[user:ban_account]]',
+				message: html,
+				show: true,
+				buttons: {
+					close: {
+						label: '[[global:close]]',
+						className: 'btn-link'
+					},
+					submit: {
+						label: '[[user:ban_account]]',
+						callback: function() {
+							var formData = $('.ban-modal form').serializeArray().reduce(function(data, cur) {
+								data[cur.name] = cur.value;
+								return data;
+							}, {});
+							var until = formData.length ? (Date.now() + formData.length * 1000*60*60 * (parseInt(formData.unit, 10) ? 24 : 1)) : 0;
+
+							socket.emit('user.banUsers', { uids: [ajaxify.data.theirid], until: until, reason: formData.reason || '' }, function(err) {
+								if (err) {
+									return app.alertError(err.message);
+								}
+								ajaxify.refresh();
+							});
+						}
 					}
-					$('#banAccountBtn').toggleClass('hide', true);
-					$('#banLabel, #unbanAccountBtn').toggleClass('hide', false);
-				});
+				}
 			});
 		});
 	}
 
 	function unbanAccount() {
-		socket.emit('admin.user.unbanUsers', [ajaxify.data.theirid], function(err) {
+		socket.emit('user.unbanUsers', [ajaxify.data.theirid], function(err) {
 			if (err) {
 				return app.alertError(err.message);
 			}
-			$('#banAccountBtn').toggleClass('hide', false);
-			$('#banLabel, #unbanAccountBtn').toggleClass('hide', true);
+			ajaxify.refresh();
 		});
 	}
 
@@ -122,7 +151,7 @@ define('forum/account/header', [
 					return;
 				}
 
-				socket.emit('admin.user.deleteUsers', [ajaxify.data.theirid], function(err) {
+				socket.emit('admin.user.deleteUsersAndContent', [ajaxify.data.theirid], function(err) {
 					if (err) {
 						return app.alertError(err.message);
 					}

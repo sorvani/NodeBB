@@ -1,16 +1,14 @@
 'use strict';
 
-var async = require('async'),
-	winston = require('winston'),
-	nconf = require('nconf'),
-	validator = require('validator'),
+var async = require('async');
+var validator = require('validator');
 
-	user = require('./user'),
-	db = require('./database'),
-	plugins = require('./plugins'),
-	posts = require('./posts'),
-	privileges = require('./privileges'),
-	utils = require('../public/src/utils');
+var user = require('./user');
+var db = require('./database');
+var plugins = require('./plugins');
+var posts = require('./posts');
+var privileges = require('./privileges');
+var utils = require('../public/src/utils');
 
 (function(Groups) {
 
@@ -20,6 +18,7 @@ var async = require('async'),
 	require('./groups/membership')(Groups);
 	require('./groups/ownership')(Groups);
 	require('./groups/search')(Groups);
+	require('./groups/cover')(Groups);
 
 	var ephemeralGroups = ['guests'],
 
@@ -183,7 +182,9 @@ var async = require('async'),
 				results.base.deleted = !!parseInt(results.base.deleted, 10);
 				results.base.hidden = !!parseInt(results.base.hidden, 10);
 				results.base.system = !!parseInt(results.base.system, 10);
-				results.base.private = results.base.private ? !!parseInt(results.base.private, 10) : true;
+				results.base.memberCount = parseInt(results.base.memberCount, 10);
+				results.base.private = (results.base.private === null || results.base.private === undefined) ? true : !!parseInt(results.base.private, 10);
+				results.base.disableJoinRequests = parseInt(results.base.disableJoinRequests, 10) === 1;
 				results.base.isMember = results.isMember;
 				results.base.isPending = results.isPending;
 				results.base.isInvited = results.isInvited;
@@ -228,7 +229,7 @@ var async = require('async'),
 				}
 			});
 
-			results.members = results.members.filter(function(user, index, array) {
+			results.members = results.members.filter(function(user) {
 				return user && user.uid && ownerUids.indexOf(user.uid.toString()) === -1;
 			});
 			results.members = results.owners.concat(results.members);
@@ -240,9 +241,9 @@ var async = require('async'),
 	Groups.escapeGroupData = function(group) {
 		if (group) {
 			group.nameEncoded = encodeURIComponent(group.name);
-			group.displayName = validator.escape(group.name);
-			group.description = validator.escape(group.description);
-			group.userTitle = validator.escape(group.userTitle) || group.displayName;
+			group.displayName = validator.escape(String(group.name));
+			group.description = validator.escape(String(group.description || ''));
+			group.userTitle = validator.escape(String(group.userTitle || '')) || group.displayName;
 		}
 	};
 
@@ -254,7 +255,7 @@ var async = require('async'),
 				return callback(new Error('[[error:no-group]]'));
 			}
 
-			Groups.get.call(Groups, groupName, options, callback);
+			Groups.get(groupName, options, callback);
 		});
 	};
 
@@ -286,23 +287,21 @@ var async = require('async'),
 
 	Groups.isPrivate = function(groupName, callback) {
 		db.getObjectField('group:' + groupName, 'private', function(err, isPrivate) {
-			isPrivate = isPrivate || isPrivate === null;
-
-			if (typeof isPrivate === 'string') {
-				isPrivate = (isPrivate === '0' ? false : true);
-			}
-
-			callback(err, isPrivate);	// Private, if not set at all
-		});
-	};
-
-	Groups.isHidden = function(groupName, callback) {
-		Groups.getGroupFields(groupName, ['hidden'], function(err, values) {
 			if (err) {
 				return callback(err);
 			}
 
-			callback(null, parseInt(values.hidden, 10) === 1);
+			callback(null, (parseInt(isPrivate, 10) === 0) ? false : true);
+		});
+	};
+
+	Groups.isHidden = function(groupName, callback) {
+		db.getObjectField(groupName, 'hidden', function(err, isHidden) {
+			if (err) {
+				return callback(err);
+			}
+
+			callback(null, parseInt(isHidden, 10) === 1);
 		});
 	};
 
@@ -312,8 +311,8 @@ var async = require('async'),
 					return utils.slugify(groupName);
 				});
 			async.parallel([
-				function(next) {
-					callback(null, slugs.map(function(slug) {
+				function (next) {
+					next(null, slugs.map(function(slug) {
 						return ephemeralGroups.indexOf(slug) !== -1;
 					}));
 				},
@@ -322,15 +321,14 @@ var async = require('async'),
 				if (err) {
 					return callback(err);
 				}
-
-				callback(null, results.map(function(result) {
-					return result[0] || result[1];
+				callback(null, name.map(function(n, index) {
+					return results[0][index] || results[1][index];
 				}));
 			});
 		} else {
 			var slug = utils.slugify(name);
 			async.parallel([
-				function(next) {
+				function (next) {
 					next(null, ephemeralGroups.indexOf(slug) !== -1);
 				},
 				async.apply(db.isSortedSetMember, 'groups:createtime', name)
@@ -350,7 +348,9 @@ var async = require('async'),
 
 	Groups.getLatestMemberPosts = function(groupName, max, uid, callback) {
 		async.waterfall([
-			async.apply(Groups.getMembers, groupName, 0, -1),
+			function(next) {
+				Groups.getMembers(groupName, 0, -1, next);
+			},
 			function(uids, next) {
 				if (!Array.isArray(uids) || !uids.length) {
 					return callback(null, []);
@@ -358,7 +358,7 @@ var async = require('async'),
 				var keys = uids.map(function(uid) {
 					return 'uid:' + uid + ':posts';
 				});
-				db.getSortedSetRevUnion(keys, 0, max - 1, next);
+				db.getSortedSetRevRange(keys, 0, max - 1, next);
 			},
 			function(pids, next) {
 				privileges.posts.filter('read', pids, uid, next);
@@ -369,19 +369,27 @@ var async = require('async'),
 		], callback);
 	};
 
+	Groups.getGroupData = function(groupName, callback) {
+		Groups.getGroupsData([groupName], function(err, groupsData) {
+			callback(err, Array.isArray(groupsData) && groupsData[0] ? groupsData[0] : null);
+		});
+	};
+
 	Groups.getGroupsData = function(groupNames, callback) {
 		if (!Array.isArray(groupNames) || !groupNames.length) {
 			return callback(null, []);
 		}
+
 		var keys = groupNames.map(function(groupName) {
-				return 'group:' + groupName;
-			}),
-			ephemeralIdx = groupNames.reduce(function(memo, cur, idx) {
-				if (ephemeralGroups.indexOf(cur) !== -1) {
-					memo.push(idx);
-				}
-				return memo;
-			}, []);
+			return 'group:' + groupName;
+		});
+
+		var ephemeralIdx = groupNames.reduce(function(memo, cur, idx) {
+			if (ephemeralGroups.indexOf(cur) !== -1) {
+				memo.push(idx);
+			}
+			return memo;
+		}, []);
 
 		db.getObjects(keys, function(err, groupData) {
 			if (err) {
@@ -402,9 +410,11 @@ var async = require('async'),
 					group.createtimeISO = utils.toISOString(group.createtime);
 					group.hidden = parseInt(group.hidden, 10) === 1;
 					group.system = parseInt(group.system, 10) === 1;
-					group.private = parseInt(group.private, 10) === 1;
+					group.private = (group.private === null || group.private === undefined) ? true : !!parseInt(group.private, 10);
+					group.disableJoinRequests = parseInt(group.disableJoinRequests) === 1;
 
 					group['cover:url'] = group['cover:url'] || require('./coverPhoto').getDefaultGroupCover(group.name);
+					group['cover:thumb:url'] = group['cover:thumb:url'] || group['cover:url'];
 					group['cover:position'] = group['cover:position'] || '50% 50%';
 				}
 			});
@@ -416,16 +426,20 @@ var async = require('async'),
 	};
 
 	Groups.getUserGroups = function(uids, callback) {
+		Groups.getUserGroupsFromSet('groups:visible:createtime', uids, callback);
+	};
+
+	Groups.getUserGroupsFromSet = function (set, uids, callback) {
 		async.waterfall([
 			function(next) {
-				db.getSortedSetRevRange('groups:visible:createtime', 0, -1, next);
+				db.getSortedSetRevRange(set, 0, -1, next);
 			},
 			function(groupNames, next) {
 				var groupSets = groupNames.map(function(name) {
-		 			return 'group:' + name + ':members';
-		 		});
+					return 'group:' + name + ':members';
+				});
 
-		 		async.map(uids, function(uid, next) {
+				async.map(uids, function(uid, next) {
 					db.isMemberOfSortedSets(groupSets, uid, function(err, isMembers) {
 						if (err) {
 							return next(err);

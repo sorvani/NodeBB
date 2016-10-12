@@ -1,16 +1,20 @@
 {
-    "category": "Category",
-    "subcategories": "Subcategories",
+    "category": "Категорија",
+    "subcategories": "Супкатегорије",
     "new_topic_button": "Nova Tema",
     "guest-login-post": "Пријавите се за слање порука",
     "no_topics": "<strong>Ne postoji nijedna tema u ovoj kategoriji.</strong><br />Zasto ne bi postavio jednu?",
     "browsing": "gleda",
     "no_replies": "Jos uvek nema odgovora",
-    "no_new_posts": "No new posts.",
+    "no_new_posts": "Нема нових постова",
     "share_this_category": "Podeli ovu kategoriju",
     "watch": "Прати",
     "ignore": "Игнориши",
-    "watch.message": "Сада пратите ажурирања ове категорије",
-    "ignore.message": "Сада игноришете ажурирања ове категорије",
-    "watched-categories": "Watched categories"
+    "watching": "Watching",
+    "ignoring": "Ignoring",
+    "watching.description": "Show topics in unread",
+    "ignoring.description": "Do not show topics in unread",
+    "watch.message": "You are now watching updates from this category and all subcategories",
+    "ignore.message": "You are now ignoring updates from this category and all subcategories",
+    "watched-categories": "Гледане категорије"
 }

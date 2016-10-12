@@ -7,17 +7,11 @@ define('forum/groups/list', ['forum/infinitescroll'], function(infinitescroll) {
 	Groups.init = function() {
 		var groupsEl = $('#groups-list');
 
-		groupsEl.on('click', '.list-cover', function() {
-			var groupSlug = $(this).parents('[data-slug]').attr('data-slug');
-
-			ajaxify.go('groups/' + groupSlug);
-		});
-
 		infinitescroll.init(Groups.loadMoreGroups);
 
 		// Group creation
 		$('button[data-action="new"]').on('click', function() {
-			bootbox.prompt('[[group:new-group.group_name]]', function(name) {
+			bootbox.prompt('[[groups:new-group.group_name]]', function(name) {
 				if (name && name.length) {
 					socket.emit('groups.create', {
 						name: name
@@ -80,6 +74,12 @@ define('forum/groups/list', ['forum/infinitescroll'], function(infinitescroll) {
 				filterHidden: true
 			}
 		}, function(err, groups) {
+			if (err) {
+				return app.alertError(err.message);
+			}
+			groups = groups.filter(function(group) {
+				return group.name !== 'registered-users' && group.name !== 'guests';
+			});
 			templates.parse('partials/groups/list', {
 				groups: groups
 			}, function(html) {

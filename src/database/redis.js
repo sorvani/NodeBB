@@ -4,16 +4,11 @@
 
 	var winston = require('winston'),
 		nconf = require('nconf'),
-		path = require('path'),
 		semver = require('semver'),
 		session = require('express-session'),
-		utils = require('./../../public/src/utils.js'),
 		redis,
 		connectRedis,
-		redisSearch,
-		redisClient,
-		postSearch,
-		topicSearch;
+		redisClient;
 
 	module.questions = [
 		{
@@ -30,6 +25,7 @@
 			name: 'redis:password',
 			description: 'Password of your Redis database',
 			hidden: true,
+			default: nconf.get('redis:password') || '',
 			before: function(value) { value = value || nconf.get('redis:password') || ''; return value; }
 		},
 		{
@@ -43,7 +39,6 @@
 		try {
 			redis = require('redis');
 			connectRedis = require('connect-redis')(session);
-			redisSearch = require('redisearch');
 		} catch (err) {
 			winston.error('Unable to initialize Redis! Is Redis installed? Error :' + err.message);
 			process.exit();
@@ -58,9 +53,6 @@
 			ttl: 60 * 60 * 24 * 14
 		});
 
-		module.postSearch = redisSearch.createSearch('nodebbpostsearch', redisClient);
-		module.topicSearch = redisSearch.createSearch('nodebbtopicsearch', redisClient);
-
 		require('./redis/main')(redisClient, module);
 		require('./redis/hash')(redisClient, module);
 		require('./redis/sets')(redisClient, module);
@@ -73,13 +65,16 @@
 	};
 
 	module.connect = function(options) {
-		var redis_socket_or_host = nconf.get('redis:host'),
-			cxn, dbIdx;
-
-		options = options || {};
+		var redis_socket_or_host = nconf.get('redis:host');
+		var cxn;
 
 		if (!redis) {
 			redis = require('redis');
+		}
+
+		options = options || {};
+		if (nconf.get('redis:password')) {
+			options.auth_pass = nconf.get('redis:password');
 		}
 
 		if (redis_socket_or_host && redis_socket_or_host.indexOf('/') >= 0) {
@@ -99,7 +94,7 @@
 			cxn.auth(nconf.get('redis:password'));
 		}
 
-		dbIdx = parseInt(nconf.get('redis:database'), 10);
+		var dbIdx = parseInt(nconf.get('redis:database'), 10);
 		if (dbIdx) {
 			cxn.select(dbIdx, function(error) {
 				if(error) {

@@ -3,6 +3,16 @@ define('components', function() {
 	var components = {};
 
 	components.core = {
+		'topic/teaser': function(tid) {
+			if (tid) {
+				return $('[component="category/topic"][data-tid="' + tid + '"] [component="topic/teaser"]');
+			} else {
+				return $('[component="topic/teaser"]');
+			}
+		},
+		'topic': function(name, value) {
+			return $('[component="topic"][data-' + name + '="' + value + '"]');
+		},
 		'post': function(name, value) {
 			return $('[component="post"][data-' + name + '="' + value + '"]');
 		},
@@ -18,8 +28,8 @@ define('components', function() {
 		'post/vote-count': function(pid) {
 			return components.core.post('pid', pid).find('[component="post/vote-count"]');
 		},
-		'post/favourite-count': function(pid) {
-			return components.core.post('pid', pid).find('[component="post/favourite-count"]');
+		'post/bookmark-count': function(pid) {
+			return components.core.post('pid', pid).find('[component="post/bookmark-count"]');
 		},
 
 		'user/postcount': function(uid) {
@@ -35,6 +45,13 @@ define('components', function() {
 
 		'categories/category': function(name, value) {
 			return $('[component="categories/category"][data-' + name + '="' + value + '"]');
+		},
+
+		'chat/message': function(messageId) {
+			return $('[component="chat/message"][data-mid="' + messageId + '"]');
+		},
+		'chat/message/body': function(messageId) {
+			return $('[component="chat/message"][data-mid="' + messageId + '"] [component="chat/message/body"]');
 		}
 	};
 

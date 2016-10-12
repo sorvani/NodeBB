@@ -1,26 +1,26 @@
 'use strict';
 
-var async = require('async'),
-	db = require('../database'),
-	posts = require('../posts'),
-	topics = require('../topics'),
-	favourites = require('../favourites'),
-	groups = require('../groups'),
-	plugins = require('../plugins'),
-	batch = require('../batch');
+var async = require('async');
+
+var db = require('../database');
+var posts = require('../posts');
+var topics = require('../topics');
+var groups = require('../groups');
+var plugins = require('../plugins');
+var batch = require('../batch');
 
 module.exports = function(User) {
 
-	User.delete = function(uid, callback) {
+	User.delete = function(callerUid, uid, callback) {
 		if (!parseInt(uid, 10)) {
 			return callback(new Error('[[error:invalid-uid]]'));
 		}
 		async.waterfall([
 			function(next) {
-				deletePosts(uid, next);
+				deletePosts(callerUid, uid, next);
 			},
 			function(next) {
-				deleteTopics(uid, next);
+				deleteTopics(callerUid, uid, next);
 			},
 			function(next) {
 				User.deleteAccount(uid, next);
@@ -28,17 +28,19 @@ module.exports = function(User) {
 		], callback);
 	};
 
-	function deletePosts(uid, callback) {
-		deleteSortedSetElements('uid:' + uid + ':posts', posts.purge, callback);
+	function deletePosts(callerUid, uid, callback) {
+		batch.processSortedSet('uid:' + uid + ':posts', function(ids, next) {
+			async.eachSeries(ids, function(pid, next) {
+				posts.purge(pid, callerUid, next);
+			}, next);
+		}, {alwaysStartAt: 0}, callback);
 	}
 
-	function deleteTopics(uid, callback) {
-		deleteSortedSetElements('uid:' + uid + ':topics', topics.purge, callback);
-	}
-
-	function deleteSortedSetElements(set, deleteMethod, callback) {
-		batch.processSortedSet(set, function(ids, next) {
-			async.eachLimit(ids, 10, deleteMethod, next);
+	function deleteTopics(callerUid, uid, callback) {
+		batch.processSortedSet('uid:' + uid + ':topics', function(ids, next) {
+			async.eachSeries(ids, function(tid, next) {
+				topics.purge(tid, callerUid, next);
+			}, next);
 		}, {alwaysStartAt: 0}, callback);
 	}
 
@@ -54,6 +56,12 @@ module.exports = function(User) {
 			},
 			function (next) {
 				deleteVotes(uid, next);
+			},
+			function (next) {
+				deleteChats(uid, next);
+			},
+			function (next) {
+				User.auth.revokeAllSessions(uid, next);
 			},
 			function (next) {
 				async.parallel([
@@ -85,7 +93,11 @@ module.exports = function(User) {
 							'users:postcount',
 							'users:reputation',
 							'users:banned',
-							'users:online'
+							'users:online',
+							'users:notvalidated',
+							'digest:day:uids',
+							'digest:week:uids',
+							'digest:month:uids'
 						], uid, next);
 					},
 					function(next) {
@@ -93,12 +105,18 @@ module.exports = function(User) {
 					},
 					function(next) {
 						var keys = [
-							'uid:' + uid + ':notifications:read', 'uid:' + uid + ':notifications:unread',
-							'uid:' + uid + ':favourites', 'uid:' + uid + ':followed_tids', 'user:' + uid + ':settings',
+							'uid:' + uid + ':notifications:read',
+							'uid:' + uid + ':notifications:unread',
+							'uid:' + uid + ':bookmarks',
+							'uid:' + uid + ':followed_tids',
+							'uid:' + uid + ':ignored_tids',
+							'user:' + uid + ':settings',
 							'uid:' + uid + ':topics', 'uid:' + uid + ':posts',
 							'uid:' + uid + ':chats', 'uid:' + uid + ':chats:unread',
+							'uid:' + uid + ':chat:rooms', 'uid:' + uid + ':chat:rooms:unread',
 							'uid:' + uid + ':upvote', 'uid:' + uid + ':downvote',
-							'uid:' + uid + ':ignored:cids', 'uid:' + uid + ':flag:pids'
+							'uid:' + uid + ':ignored:cids', 'uid:' + uid + ':flag:pids',
+							'uid:' + uid + ':sessions', 'uid:' + uid + ':sessionUUID:sessionId'
 						];
 						db.deleteAll(keys, next);
 					},
@@ -110,10 +128,6 @@ module.exports = function(User) {
 					},
 					function(next) {
 						groups.leaveAllGroups(uid, next);
-					},
-					function(next) {
-						// Deprecated as of v0.7.4, remove in v1.0.0
-						plugins.fireHook('filter:user.delete', uid, next);
 					}
 				], next);
 			},
@@ -136,9 +150,32 @@ module.exports = function(User) {
 					return pid && array.indexOf(pid) === index;
 				});
 
-				async.eachLimit(pids, 50, function(pid, next) {
-					favourites.unvote(pid, uid, next);
+				async.eachSeries(pids, function(pid, next) {
+					posts.unvote(pid, uid, next);
 				}, next);
+			}
+		], function(err) {
+			callback(err);
+		});
+	}
+
+	function deleteChats(uid, callback) {
+		async.waterfall([
+			function (next) {
+				db.getSortedSetRange('uid:' + uid + ':chat:rooms', 0, -1, next);
+			},
+			function (roomIds, next) {
+				var userKeys = roomIds.map(function(roomId) {
+					return 'uid:' + uid + ':chat:room:' + roomId + ':mids';
+				});
+				var roomKeys = roomIds.map(function(roomId) {
+					return 'chat:room:' + roomId + ':uids';
+				});
+
+				async.parallel([
+					async.apply(db.sortedSetsRemove, roomKeys, uid),
+					async.apply(db.deleteAll, userKeys)
+				], next);
 			}
 		], function(err) {
 			callback(err);

@@ -1,17 +1,16 @@
 
 'use strict';
 
-var async = require('async'),
-	nconf = require('nconf'),
-	winston = require('winston'),
+var async = require('async');
+var nconf = require('nconf');
 
-	user = require('../user'),
-	utils = require('../../public/src/utils'),
-	translator = require('../../public/src/modules/translator'),
-	plugins = require('../plugins'),
-	db = require('../database'),
-	meta = require('../meta'),
-	emailer = require('../emailer');
+var user = require('../user');
+var utils = require('../../public/src/utils');
+var translator = require('../../public/src/modules/translator');
+var plugins = require('../plugins');
+var db = require('../database');
+var meta = require('../meta');
+var emailer = require('../emailer');
 
 (function(UserEmail) {
 
@@ -29,10 +28,10 @@ var async = require('async'),
 
 	UserEmail.sendValidationEmail = function(uid, email, callback) {
 		callback = callback || function() {};
-		var confirm_code = utils.generateUUID(),
-			confirm_link = nconf.get('url') + '/confirm/' + confirm_code;
+		var confirm_code = utils.generateUUID();
+		var confirm_link = nconf.get('url') + '/confirm/' + confirm_code;
 
-		var emailInterval = 10;
+		var emailInterval = meta.config.hasOwnProperty('emailConfirmInterval') ? parseInt(meta.config.emailConfirmInterval, 10) : 10;
 
 		async.waterfall([
 			function(next) {
@@ -97,7 +96,11 @@ var async = require('async'),
 			if (confirmObj && confirmObj.uid && confirmObj.email) {
 				async.series([
 					async.apply(user.setUserField, confirmObj.uid, 'email:confirmed', 1),
-					async.apply(db.delete, 'confirm:' + code)
+					async.apply(db.delete, 'confirm:' + code),
+					async.apply(db.delete, 'uid:' + confirmObj.uid + ':confirm:email:sent'),
+					function(next) {
+						db.sortedSetRemove('users:notvalidated', confirmObj.uid, next);
+					}
 				], function(err) {
 					callback(err ? new Error('[[error:email-confirm-failed]]') : null);
 				});

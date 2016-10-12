@@ -3,9 +3,9 @@
 <p>{summary}:</p>
 <blockquote>{message.content}</blockquote>
 
-<a href="{url}/chats/{fromUserslug}">[[email:notif.chat.cta]]</a>
+<a href="{url}/chats/{roomId}">[[email:notif.chat.cta]]</a>
 
-{footer}
+<!-- IMPORT emails/partials/footer.tpl -->
 
 <hr />
 <p>

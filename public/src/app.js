@@ -1,5 +1,5 @@
 "use strict";
-/*global io, templates, ajaxify, utils, bootbox, overrides, socket, config, Visibility*/
+/*global templates, ajaxify, utils, bootbox, overrides, socket, config, Visibility*/
 
 var app = app || {};
 
@@ -15,86 +15,90 @@ app.cacheBuster = null;
 
 	app.cacheBuster = config['cache-buster'];
 
-	require(['csrf'], function(csrf) {
-		csrf.set(config.csrf_token);
-	});
-
 	bootbox.setDefaults({
 		locale: config.userLang
 	});
 
 	app.load = function() {
-		$('document').ready(function () {
-			var url = ajaxify.start(window.location.pathname.slice(1) + window.location.search, true);
-			ajaxify.end(url, app.template);
+		app.loadProgressiveStylesheet();
 
-			handleStatusChange();
+		var url = ajaxify.start(window.location.pathname.slice(1) + window.location.search + window.location.hash);
+		ajaxify.updateHistory(url, true);
+		ajaxify.parseData();
+		ajaxify.end(url, app.template);
 
-			if (config.searchEnabled) {
-				app.handleSearch();
+		handleStatusChange();
+
+		if (config.searchEnabled) {
+			app.handleSearch();
+		}
+
+		$('body').on('click', '#new_topic', function(){
+			app.newTopic();
+		});
+
+		require(['components'], function(components) {
+			components.get('user/logout').on('click', app.logout);
+		});
+
+		Visibility.change(function(event, state){
+			if (state === 'visible') {
+				app.isFocused = true;
+				app.alternatingTitle('');
+			} else if (state === 'hidden') {
+				app.isFocused = false;
 			}
+		});
 
-			handleNewTopic();
+		overrides.overrideBootbox();
+		overrides.overrideTimeago();
+		createHeaderTooltips();
+		app.showEmailConfirmWarning();
 
-			require(['components'], function(components) {
-				components.get('user/logout').on('click', app.logout);
-			});
+		socket.removeAllListeners('event:nodebb.ready');
+		socket.on('event:nodebb.ready', function(data) {
+			if (!app.cacheBuster || app.cacheBuster !== data['cache-buster']) {
+				app.cacheBuster = data['cache-buster'];
 
-			Visibility.change(function(e, state){
-				if (state === 'visible') {
-					app.isFocused = true;
-					app.alternatingTitle('');
-				} else if (state === 'hidden') {
-					app.isFocused = false;
-				}
-			});
+				app.alert({
+					alert_id: 'forum_updated',
+					title: '[[global:updated.title]]',
+					message: '[[global:updated.message]]',
+					clickfn: function() {
+						window.location.reload();
+					},
+					type: 'warning'
+				});
+			}
+		});
 
-			overrides.overrideBootbox();
-			overrides.overrideTimeago();
-			createHeaderTooltips();
-			app.showEmailConfirmWarning();
+		require(['taskbar', 'helpers', 'forum/pagination'], function(taskbar, helpers, pagination) {
+			taskbar.init();
 
-			socket.removeAllListeners('event:nodebb.ready');
-			socket.on('event:nodebb.ready', function(data) {
-				if (!app.cacheBusters || app.cacheBusters['cache-buster'] !== data['cache-buster']) {
-					app.cacheBusters = data;
+			// templates.js helpers
+			helpers.register();
 
-					app.alert({
-						alert_id: 'forum_updated',
-						title: '[[global:updated.title]]',
-						message: '[[global:updated.message]]',
-						clickfn: function() {
-							window.location.reload();
-						},
-						type: 'warning'
-					});
-				}
-			});
+			pagination.init();
 
-			require(['taskbar', 'helpers', 'forum/pagination'], function(taskbar, helpers, pagination) {
-				taskbar.init();
-
-				// templates.js helpers
-				helpers.register();
-
-				pagination.init();
-
-				$(window).trigger('action:app.load');
-			});
+			$(window).trigger('action:app.load');
 		});
 	};
 
 	app.logout = function() {
-		require(['csrf'], function(csrf) {
-			$.ajax(config.relative_path + '/logout', {
-				type: 'POST',
-				headers: {
-					'x-csrf-token': csrf.get()
-				},
-				success: function() {
-					window.location.href = config.relative_path + '/';
-				}
-			});
+		$(window).trigger('action:app.logout');
+		$.ajax(config.relative_path + '/logout', {
+			type: 'POST',
+			headers: {
+				'x-csrf-token': config.csrf_token
+			},
+			success: function() {
+				var payload = {
+					next: config.relative_path + '/'
+				};
+
+				$(window).trigger('action:app.loggedOut', payload);
+				window.location.href = payload.next;
+			}
 		});
 	};
 
@@ -115,35 +119,58 @@ app.cacheBuster = null;
 			title: '[[global:alert.success]]',
 			message: message,
 			type: 'success',
-			timeout: timeout ? timeout : 2000
+			timeout: timeout ? timeout : 5000
 		});
 	};
 
 	app.alertError = function (message, timeout) {
+		if (message === '[[error:invalid-session]]') {
+			return app.handleInvalidSession();
+		}
+
 		app.alert({
 			title: '[[global:alert.error]]',
 			message: message,
 			type: 'danger',
-			timeout: timeout ? timeout : 5000
+			timeout: timeout ? timeout : 10000
+		});
+	};
+
+	app.handleInvalidSession = function() {
+		if (app.flags && app.flags._sessionRefresh) {
+			return;
+		}
+
+		app.flags = app.flags || {};
+		app.flags._sessionRefresh = true;
+
+		require(['translator'], function(translator) {
+			translator.translate('[[error:invalid-session-text]]', function(translated) {
+				bootbox.alert({
+					title: '[[error:invalid-session]]',
+					message: translated,
+					closeButton: false,
+					callback: function() {
+						window.location.reload();
+					}
+				});
+			});
 		});
 	};
 
 	app.enterRoom = function (room, callback) {
 		callback = callback || function() {};
 		if (socket && app.user.uid && app.currentRoom !== room) {
+			var previousRoom = app.currentRoom;
+			app.currentRoom = room;
 			socket.emit('meta.rooms.enter', {
-				enter: room,
-				username: app.user.username,
-				userslug: app.user.userslug,
-				picture: app.user.picture,
-				status: app.user.status,
-				'icon:bgColor': app.user['icon:bgColor'],
-				'icon:text': app.user['icon:text']
+				enter: room
 			}, function(err) {
 				if (err) {
+					app.currentRoom = previousRoom;
 					return app.alertError(err.message);
 				}
-				app.currentRoom = room;
+
 				callback();
 			});
 		}
@@ -159,7 +186,7 @@ app.cacheBuster = null;
 			}
 			app.currentRoom = '';
 		});
-	}
+	};
 
 	function highlightNavigationLink() {
 		var path = window.location.pathname;
@@ -169,12 +196,12 @@ app.cacheBuster = null;
 		}
 	}
 
-	app.createUserTooltips = function(els) {
+	app.createUserTooltips = function(els, placement) {
 		els = els || $('body');
-		els.find('img[title].teaser-pic,img[title].user-img,div.user-icon,span.user-icon').each(function() {
+		els.find('.avatar,img[title].teaser-pic,img[title].user-img,div.user-icon,span.user-icon').each(function() {
 			if (!utils.isTouchDevice()) {
 				$(this).tooltip({
-					placement: 'top',
+					placement: placement || $(this).attr('title-placement') || 'top',
 					title: $(this).attr('title')
 				});
 			}
@@ -239,11 +266,7 @@ app.cacheBuster = null;
 		}
 	};
 
-	app.openChat = function (username, touid) {
-		if (username === app.user.username) {
-			return app.alertError('[[error:cant-chat-with-yourself]]');
-		}
-
+	app.openChat = function (roomId, uid) {
 		if (!app.user.uid) {
 			return app.alertError('[[error:not-logged-in]]');
 		}
@@ -255,14 +278,41 @@ app.cacheBuster = null;
 				chat.focusInput(chatModal);
 			}
 
-			if (!chat.modalExists(touid)) {
-				chat.createModal({
-					username: username,
-					touid: touid
-				}, loadAndCenter);
+			if (chat.modalExists(roomId)) {
+				loadAndCenter(chat.getModal(roomId));
 			} else {
-				loadAndCenter(chat.getModal(touid));
+				socket.emit('modules.chats.loadRoom', {roomId: roomId, uid: uid || app.user.uid}, function(err, roomData) {
+					if (err) {
+						return app.alertError(err.message);
+					}
+					roomData.users = roomData.users.filter(function(user) {
+						return user && parseInt(user.uid, 10) !== parseInt(app.user.uid, 10);
+					});
+					roomData.uid = uid || app.user.uid;
+					chat.createModal(roomData, loadAndCenter);
+				});
 			}
+		});
+	};
+
+	app.newChat = function (touid, callback) {
+		callback = callback || function() {};
+		if (!app.user.uid) {
+			return app.alertError('[[error:not-logged-in]]');
+		}
+
+		socket.emit('modules.chats.newRoom', {touid: touid}, function(err, roomId) {
+			if (err) {
+				return app.alertError(err.message);
+			}
+
+			if (!ajaxify.currentPage.startsWith('chats')) {
+				app.openChat(roomId);
+			} else {
+				ajaxify.go('chats/' + roomId);
+			}
+
+			callback(false, roomId);
 		});
 	};
 
@@ -312,7 +362,10 @@ app.cacheBuster = null;
 			return;
 		}
 		require(['translator'], function(translator) {
-			title = config.titleLayout.replace(/&#123;/g, '{').replace(/&#125;/g, '}').replace('{pageTitle}', title).replace('{browserTitle}', config.browserTitle);
+			title = config.titleLayout.replace(/&#123;/g, '{').replace(/&#125;/g, '}')
+				.replace('{pageTitle}', function() { return title; })
+				.replace('{browserTitle}', function() { return config.browserTitle; });
+
 			translator.translate(title, function(translated) {
 				titleObj.titles[0] = translated;
 				app.alternatingTitle('');
@@ -336,6 +389,7 @@ app.cacheBuster = null;
 			if (!utils.isTouchDevice()) {
 				$(this).tooltip({
 					placement: 'bottom',
+					trigger: 'hover',
 					title: $(this).attr('title')
 				});
 			}
@@ -344,6 +398,7 @@ app.cacheBuster = null;
 		if (!utils.isTouchDevice()) {
 			$('#search-form').parent().tooltip({
 				placement: 'bottom',
+				trigger: 'hover',
 				title: $('#search-button i').attr('title')
 			});
 		}
@@ -351,6 +406,7 @@ app.cacheBuster = null;
 		if (!utils.isTouchDevice()) {
 			$('#user_dropdown').tooltip({
 				placement: 'bottom',
+				trigger: 'hover',
 				title: $('#user_dropdown').attr('title')
 			});
 		}
@@ -391,7 +447,9 @@ app.cacheBuster = null;
 		$('#search-form').on('submit', function () {
 			var input = $(this).find('input');
 			require(['search'], function(search) {
-				search.query({term: input.val()}, function() {
+				var data = search.getSearchPreferences();
+				data.term = input.val();
+				search.query(data, function() {
 					input.val('');
 				});
 			});
@@ -408,7 +466,7 @@ app.cacheBuster = null;
 	function handleStatusChange() {
 		$('[component="header/usercontrol"] [data-status]').off('click').on('click', function(e) {
 			var status = $(this).attr('data-status');
-			socket.emit('user.setStatus', status, function(err, data) {
+			socket.emit('user.setStatus', status, function(err) {
 				if(err) {
 					return app.alertError(err.message);
 				}
@@ -437,87 +495,89 @@ app.cacheBuster = null;
 		});
 	};
 
-	function handleNewTopic() {
-		$('#content').on('click', '#new_topic', function() {
-			var cid = ajaxify.data.cid;
-			if (cid) {
-				$(window).trigger('action:composer.topic.new', {
-					cid: cid
-				});
-			} else {
-				socket.emit('categories.getCategoriesByPrivilege', 'topics:create', function(err, categories) {
-					if (err) {
-						return app.alertError(err.message);
-					}
-					categories = categories.filter(function(category) {
-						return !category.link && !parseInt(category.parentCid, 10);
-					});
-					if (categories.length) {
-						$(window).trigger('action:composer.topic.new', {
-							cid: categories[0].cid
-						});
-					}
-				});
-			}
+	app.newTopic = function (cid, tags) {
+		$(window).trigger('action:composer.topic.new', {
+			cid: cid || ajaxify.data.cid || 0,
+			tags: tags || (ajaxify.data.tag ? [ajaxify.data.tag] : [])
 		});
-	}
+	};
 
 	app.loadJQueryUI = function(callback) {
 		if (typeof $().autocomplete === 'function') {
 			return callback();
 		}
 
-		$.getScript(config.relative_path + '/vendor/jquery/js/jquery-ui-1.10.4.custom.js', callback);
+		var scriptEl = document.createElement('script');
+		scriptEl.type = 'text/javascript';
+		scriptEl.src = config.relative_path + '/vendor/jquery/js/jquery-ui.js' + (app.cacheBuster ? '?v=' + app.cacheBuster : '');
+		scriptEl.onload = callback;
+		document.head.appendChild(scriptEl);
 	};
 
 	app.showEmailConfirmWarning = function(err) {
 		if (!config.requireEmailConfirmation || !app.user.uid) {
 			return;
 		}
+		var msg = {
+			alert_id: 'email_confirm',
+			type: 'warning',
+			timeout: 0
+		};
+
 		if (!app.user.email) {
-			app.alert({
-				alert_id: 'email_confirm',
-				message: '[[error:no-email-to-confirm]]',
-				type: 'warning',
-				timeout: 0,
-				clickfn: function() {
-					app.removeAlert('email_confirm');
-					ajaxify.go('user/' + app.user.userslug + '/edit');
-				}
-			});
-		} else if (!app.user['email:confirmed']) {
-			app.alert({
-				alert_id: 'email_confirm',
-				message: err ? err.message : '[[error:email-not-confirmed]]',
-				type: 'warning',
-				timeout: 0,
-				clickfn: function() {
-					app.removeAlert('email_confirm');
-					socket.emit('user.emailConfirm', {}, function(err) {
-						if (err) {
-							return app.alertError(err.message);
-						}
-						app.alertSuccess('[[notifications:email-confirm-sent]]');
-					});
-				}
-			});
+			msg.message = '[[error:no-email-to-confirm]]';
+			msg.clickfn = function() {
+				app.removeAlert('email_confirm');
+				ajaxify.go('user/' + app.user.userslug + '/edit');
+			};
+			app.alert(msg);
+		} else if (!app.user['email:confirmed'] && !app.user.isEmailConfirmSent) {
+			msg.message = err ? err.message : '[[error:email-not-confirmed]]';
+			msg.clickfn = function() {
+				app.removeAlert('email_confirm');
+				socket.emit('user.emailConfirm', {}, function(err) {
+					if (err) {
+						return app.alertError(err.message);
+					}
+					app.alertSuccess('[[notifications:email-confirm-sent]]');
+				});
+			};
+
+			app.alert(msg);
+		} else if (!app.user['email:confirmed'] && app.user.isEmailConfirmSent) {
+			msg.message = '[[error:email-not-confirmed-email-sent]]';
+			app.alert(msg);
 		}
 	};
 
 	app.parseAndTranslate = function(template, blockName, data, callback) {
-		if (typeof blockName === 'string') {
-			templates.parse(template, blockName, data, function(html) {
+		require(['translator'], function(translator) {
+			function translate(html, callback) {
 				translator.translate(html, function(translatedHTML) {
+					translatedHTML = translator.unescape(translatedHTML);
 					callback($(translatedHTML));
 				});
-			});
-		} else {
-			callback = data, data = blockName;
-			templates.parse(template, data, function(html) {
-				translator.translate(html, function(translatedHTML) {
-					callback($(translatedHTML));
+			}
+
+			if (typeof blockName === 'string') {
+				templates.parse(template, blockName, data, function(html) {
+					translate(html, callback);
 				});
-			});
-		}
+			} else {
+				callback = data;
+				data = blockName;
+				templates.parse(template, data, function(html) {
+					translate(html, callback);
+				});
+			}
+		});
+	};
+
+	app.loadProgressiveStylesheet = function() {
+		var linkEl = document.createElement('link');
+		linkEl.rel = 'stylesheet';
+		linkEl.href = config.relative_path + '/js-enabled.css';
+
+		document.head.appendChild(linkEl);
 	};
 }());

@@ -19,8 +19,8 @@ dashboardController.get = function(req, res, next) {
 			var notices = [
 				{
 					done: !meta.reloadRequired,
-					doneText: 'Reload not required',
-					notDoneText:'Reload required'
+					doneText: 'Restart not required',
+					notDoneText:'Restart required'
 				},
 				{
 					done: plugins.hasListeners('filter:search.query'),
@@ -81,13 +81,13 @@ function getStatsForSet(set, field, callback) {
 	var now = Date.now();
 	async.parallel({
 		day: function(next) {
-			db.sortedSetCount(set, now - terms.day, now, next);
+			db.sortedSetCount(set, now - terms.day, '+inf', next);
 		},
 		week: function(next) {
-			db.sortedSetCount(set, now - terms.week, now, next);
+			db.sortedSetCount(set, now - terms.week, '+inf', next);
 		},
 		month: function(next) {
-			db.sortedSetCount(set, now - terms.month, now, next);
+			db.sortedSetCount(set, now - terms.month, '+inf', next);
 		},
 		alltime: function(next) {
 			getGlobalField(field, next);

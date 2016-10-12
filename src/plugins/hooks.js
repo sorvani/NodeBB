@@ -4,11 +4,11 @@ var winston = require('winston'),
 	async = require('async');
 
 module.exports = function(Plugins) {
-	Plugins.deprecatedHooks = [
-		'filter:user.delete',
-		'filter:user.custom_fields'
-	];
-
+	Plugins.deprecatedHooks = {
+		'filter:user.custom_fields': null,	// remove in v1.1.0
+		'filter:post.save': 'filter:post.create',
+		'filter:user.profileLinks': 'filter:user.profileMenu'
+	};
 	/*
 		`data` is an object consisting of (* is required):
 			`data.hook`*, the name of the NodeBB hook
@@ -16,19 +16,35 @@ module.exports = function(Plugins) {
 			`data.priority`, the relative priority of the method when it is eventually called (default: 10)
 	*/
 	Plugins.registerHook = function(id, data, callback) {
+		callback = callback || function() {};
 		function register() {
 			Plugins.loadedHooks[data.hook] = Plugins.loadedHooks[data.hook] || [];
 			Plugins.loadedHooks[data.hook].push(data);
 
-			if (typeof callback === 'function') {
-				callback();
-			}
+			callback();
+		}
+
+		if (!data.hook) {
+			winston.warn('[plugins/' + id + '] registerHook called with invalid data.hook', data);
+			return callback();
 		}
 
 		var method;
 
-		if (Plugins.deprecatedHooks.indexOf(data.hook) !== -1) {
-			winston.warn('[plugins/' + id + '] Hook `' + data.hook + '` is deprecated, please use an alternative');
+		if (Object.keys(Plugins.deprecatedHooks).indexOf(data.hook) !== -1) {
+			winston.warn('[plugins/' + id + '] Hook `' + data.hook + '` is deprecated, ' +
+				(Plugins.deprecatedHooks[data.hook] ?
+					'please use `' + Plugins.deprecatedHooks[data.hook] + '` instead.' :
+					'there is no alternative.'
+				)
+			);
+		} else {
+			// handle hook's startsWith, i.e. action:homepage.get
+			var parts = data.hook.split(':');
+			if (parts.length > 2) {
+				parts.pop();
+			}
+			var hook = parts.join(':');
 		}
 
 		if (data.hook && data.method) {
@@ -55,6 +71,7 @@ module.exports = function(Plugins) {
 				register();
 			} else {
 				winston.warn('[plugins/' + id + '] Hook method mismatch: ' + data.hook + ' => ' + data.method);
+				return callback();
 			}
 		}
 	};

@@ -1,6 +1,6 @@
 ;(function(exports) {
 	"use strict";
-	/* globals define, utils */
+	/* globals define, utils, config */
 
 	// export the class if we are in a Node-like system.
 	if (typeof module === 'object' && module.exports === exports) {
@@ -18,17 +18,18 @@
 
 		if (properties) {
 			if ((properties.loggedIn && !data.config.loggedIn) ||
+				(properties.globalMod && !data.isGlobalMod && !data.isAdmin) ||
 				(properties.adminOnly && !data.isAdmin) ||
-				(properties.installed && properties.installed.search && !data.searchEnabled)) {
+				(properties.searchInstalled && !data.searchEnabled)) {
 				return false;
 			}
 		}
 
-		if (item.route.match('/users') && data.config.privateUserInfo && !data.config.loggedIn) {
+		if (item.route.match('/users') && data.privateUserInfo && !data.config.loggedIn) {
 			return false;
 		}
 
-		if (item.route.match('/tags') && data.config.privateTagListing && !data.config.loggedIn) {
+		if (item.route.match('/tags') && data.privateTagListing && !data.config.loggedIn) {
 			return false;
 		}
 
@@ -99,6 +100,27 @@
 		return style.join('; ') + ';';
 	};
 
+	helpers.generateChildrenCategories = function(category) {
+		var html = '';
+		var relative_path = (typeof config !== 'undefined' ? config.relative_path : require('nconf').get('relative_path'));
+		if (!category || !category.children) {
+			return html;
+		}
+		category.children.forEach(function(child) {
+			if (!child) {
+				return;
+			}
+			var link = child.link ? child.link : (relative_path + '/category/' + child.slug);
+			html += '<a href="' + link + '">' +
+					'<span class="fa-stack fa-lg">' +
+					'<i style="color:' + child.bgColor + ';" class="fa fa-circle fa-stack-2x"></i>' +
+					'<i style="color:' + child.color + ';" class="fa fa-stack-1x ' + child.icon + '"></i>' +
+					'</span><small>' + child.name + '</small></a> ';
+		});
+		html = html ? ('<span class="category-children">' + html + '</span>') : html;
+		return html;
+	};
+
 	helpers.generateTopicClass = function(topic) {
 		var style = [];
 
@@ -142,8 +164,10 @@
 				return '<button class="btn btn-warning disabled"><i class="fa fa-clock-o"></i> [[groups:membership.invitation-pending]]</button>';
 			} else if (groupObj.isInvited) {
 				return '<button class="btn btn-link" data-action="rejectInvite" data-group="' + groupObj.displayName + '">[[groups:membership.reject]]</button><button class="btn btn-success" data-action="acceptInvite" data-group="' + groupObj.name + '"><i class="fa fa-plus"></i> [[groups:membership.accept-invitation]]</button>';
-			} else {
+			} else if (!groupObj.disableJoinRequests) {
 				return '<button class="btn btn-success" data-action="join" data-group="' + groupObj.displayName + '"><i class="fa fa-plus"></i> [[groups:membership.join-group]]</button>';
+			} else {
+				return '';
 			}
 		}
 	};
@@ -189,6 +213,58 @@
 				return '<div style="width: 16px; height: 16px; line-height: 16px; font-size: 10px; margin-right: 1em; background-color: ' + block.user['icon:bgColor'] + '; color: white; text-align: center; display: inline-block;">' + block.user['icon:text'] + '</div>';
 			}
 		}
+	};
+
+	helpers.userAgentIcons = function(data) {
+		var icons = '';
+
+		switch(data.platform) {
+			case 'Linux':
+				icons += '<i class="fa fa-fw fa-linux"></i>';
+				break;
+			case 'Microsoft Windows':
+				icons += '<i class="fa fa-fw fa-windows"></i>';
+				break;
+			case 'Apple Mac':
+				icons += '<i class="fa fa-fw fa-apple"></i>';
+				break;
+			case 'Android':
+				icons += '<i class="fa fa-fw fa-android"></i>';
+				break;
+			case 'iPad':
+				icons += '<i class="fa fa-fw fa-tablet"></i>';
+				break;
+			case 'iPod':	// intentional fall-through
+			case 'iPhone':
+				icons += '<i class="fa fa-fw fa-mobile"></i>';
+				break;
+			default:
+				icons += '<i class="fa fa-fw fa-question-circle"></i>';
+				break;
+		}
+
+		switch(data.browser) {
+			case 'Chrome':
+				icons += '<i class="fa fa-fw fa-chrome"></i>';
+				break;
+			case 'Firefox':
+				icons += '<i class="fa fa-fw fa-firefox"></i>';
+				break;
+			case 'Safari':
+				icons += '<i class="fa fa-fw fa-safari"></i>';
+				break;
+			case 'IE':
+				icons += '<i class="fa fa-fw fa-internet-explorer"></i>';
+				break;
+			case 'Edge':
+				icons += '<i class="fa fa-fw fa-edge"></i>';
+				break;
+			default:
+				icons += '<i class="fa fa-fw fa-question-circle"></i>';
+				break;
+		}
+
+		return icons;
 	};
 
 	exports.register = function() {

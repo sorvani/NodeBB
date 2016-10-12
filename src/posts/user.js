@@ -1,53 +1,49 @@
 'use strict';
 
-var async = require('async'),
+var async = require('async');
+var validator = require('validator');
 
-	db = require('../database'),
-	user = require('../user'),
-	groups = require('../groups'),
-	meta = require('../meta'),
-	plugins = require('../plugins');
-
+var user = require('../user');
+var groups = require('../groups');
+var meta = require('../meta');
+var plugins = require('../plugins');
 
 module.exports = function(Posts) {
 
 	Posts.getUserInfoForPosts = function(uids, uid, callback) {
-		async.parallel({
-			groups: function(next) {
-				groups.getUserGroups(uids, next);
+		var groupsMap = {};
+		var userData;
+		async.waterfall([
+			function(next) {
+				user.getUsersFields(uids, ['uid', 'username', 'fullname', 'userslug', 'reputation', 'postcount', 'picture', 'signature', 'banned', 'status', 'lastonline', 'groupTitle'], next);
 			},
-			userSettings: function(next){
-				user.getMultipleUserSettings(uids, next);
-			},
-			userData: function(next) {
-				user.getUsersFields(uids, ['uid', 'username', 'fullname', 'userslug', 'reputation', 'postcount', 'picture', 'signature', 'banned', 'status', 'lastonline'], next);
+			function(_userData, next) {
+				userData = _userData;
+				var groupTitles = userData.map(function(userData) {
+					return userData && userData.groupTitle;
+				}).filter(function(groupTitle, index, array) {
+					return groupTitle && array.indexOf(groupTitle) === index;
+				});
+				groups.getGroupsData(groupTitles, next);
 			}
-		}, function(err, results) {
+		], function(err, groupsData) {
 			if (err) {
 				return callback(err);
 			}
 
-			var userData = results.userData;
-			userData.forEach(function(userData, i) {
-				userData.groups = [];
-
-				results.groups[i].forEach(function(group, index) {
-					userData.groups[index] = {
+			groupsData.forEach(function(group) {
+				if (group && group.userTitleEnabled) {
+					groupsMap[group.name] = {
 						name: group.name,
 						slug: group.slug,
 						labelColor: group.labelColor,
 						icon: group.icon,
 						userTitle: group.userTitle
 					};
-
-					if (results.userSettings[i] && group.name === results.userSettings[i].groupTitle && group.userTitleEnabled) {
-						userData.selectedGroup = userData.groups[index];
-					}
-				});
-				userData.status = user.getStatus(userData);
+				}
 			});
 
-			async.map(userData, function(userData, next) {
+			userData.forEach(function(userData) {
 				userData.uid = userData.uid || 0;
 				userData.username = userData.username || '[[global:guest]]';
 				userData.userslug = userData.userslug || '';
@@ -55,8 +51,19 @@ module.exports = function(Posts) {
 				userData.postcount = userData.postcount || 0;
 				userData.banned = parseInt(userData.banned, 10) === 1;
 				userData.picture = userData.picture || '';
+				userData.status = user.getStatus(userData);
+				userData.signature = validator.escape(String(userData.signature || ''));
+				userData.fullname = validator.escape(String(userData.fullname || ''));
+			});
 
+			async.map(userData, function(userData, next) {
 				async.parallel({
+					isMemberOfGroup: function (next) {
+						if (!userData.groupTitle || !groupsMap[userData.groupTitle]) {
+							return next();
+						}
+						groups.isMember(userData.uid, userData.groupTitle, next);
+					},
 					signature: function(next) {
 						if (!userData.signature || parseInt(meta.config.disableSignatures, 10) === 1) {
 							userData.signature = '';
@@ -70,6 +77,10 @@ module.exports = function(Posts) {
 				}, function(err, results) {
 					if (err) {
 						return next(err);
+					}
+
+					if (results.isMemberOfGroup && userData.groupTitle && groupsMap[userData.groupTitle]) {
+						userData.selectedGroup = groupsMap[userData.groupTitle];
 					}
 
 					userData.custom_profile_info = results.customProfileInfo.profile;

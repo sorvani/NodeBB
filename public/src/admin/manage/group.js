@@ -1,11 +1,12 @@
 "use strict";
-/*global define, templates, socket, ajaxify, app, bootbox, translator */
+/*global define, templates, socket, ajaxify, app, bootbox */
 
 define('admin/manage/group', [
 	'forum/groups/memberlist',
 	'iconSelect',
-	'admin/modules/colorpicker'
-], function(memberList, iconSelect, colorpicker) {
+	'admin/modules/colorpicker',
+	'translator'
+], function(memberList, iconSelect, colorpicker, translator) {
 	var	Groups = {};
 
 	Groups.init = function() {
@@ -56,9 +57,13 @@ define('admin/manage/group', [
 									'data-uid': results.users[x].uid,
 									'data-username': results.users[x].username,
 									'data-userslug': results.users[x].userslug,
-									'data-picture': results.users[x].picture
+									'data-picture': results.users[x].picture,
+									'data-usericon-bgColor': results.users[x]['icon:bgColor'],
+									'data-usericon-text': results.users[x]['icon:text']
 								})
-								.append($('<img />').attr('src', results.users[x].picture))
+								.append(results.users[x].picture ?
+									$('<img />').addClass('avatar avatar-sm').attr('src', results.users[x].picture) :
+									$('<div />').addClass('avatar avatar-sm').css('background-color', results.users[x]['icon:bgColor']).html(results.users[x]['icon:text']))
 								.append($('<span />').html(results.users[x].username));
 
 							groupDetailsSearchResults.append(foundUser);
@@ -86,12 +91,14 @@ define('admin/manage/group', [
 					uid: userLabel.attr('data-uid'),
 					username: userLabel.attr('data-username'),
 					userslug: userLabel.attr('data-userslug'),
-					picture: userLabel.attr('data-picture')
+					picture: userLabel.attr('data-picture'),
+					"icon:bgColor": userLabel.attr('data-usericon-bgColor'),
+					"icon:text": userLabel.attr('data-usericon-text')
 				};
 
 				templates.parse('partials/groups/memberlist', 'members', {group: {isOwner: ajaxify.data.group.isOwner, members: [member]}}, function(html) {
 					translator.translate(html, function(html) {
-						$('[component="groups/members"] tr').first().before(html);
+						$('[component="groups/members"] tbody').prepend(html);
 					});
 				});
 			});
@@ -157,14 +164,24 @@ define('admin/manage/group', [
 					description: $('#change-group-desc').val(),
 					icon: groupIcon.attr('value'),
 					labelColor: changeGroupLabelColor.val(),
+					userTitleEnabled: $('#group-userTitleEnabled').is(':checked'),
 					private: $('#group-private').is(':checked'),
-					hidden: $('#group-hidden').is(':checked')
+					hidden: $('#group-hidden').is(':checked'),
+					disableJoinRequests: $('#group-disableJoinRequests').is(':checked')
 				}
 			}, function(err) {
 				if (err) {
 					return app.alertError(err.message);
 				}
-				app.alertSuccess('Changes saved!');
+
+				var newName = $('#change-group-name').val();
+
+				// If the group name changed, change url
+				if (groupName === newName) {
+					app.alertSuccess('Changes saved!');
+				} else {
+					ajaxify.go('admin/manage/groups/' + encodeURIComponent(newName), undefined, true);
+				}
 			});
 			return false;
 		});

@@ -1,50 +1,44 @@
 'use strict';
 
-var async = require('async'),
-	validator = require('validator'),
+var async = require('async');
+var validator = require('validator');
 
-	db = require('./database'),
-	posts = require('./posts'),
-	topics = require('./topics'),
-	categories = require('./categories'),
-	user = require('./user'),
-	plugins = require('./plugins'),
-	privileges = require('./privileges'),
-	utils = require('../public/src/utils');
+var db = require('./database');
+var posts = require('./posts');
+var topics = require('./topics');
+var categories = require('./categories');
+var user = require('./user');
+var plugins = require('./plugins');
+var privileges = require('./privileges');
+var utils = require('../public/src/utils');
 
 var search = {};
 
 module.exports = search;
 
 search.search = function(data, callback) {
-	function done(err, data) {
-		if (err) {
-			return callback(err);
-		}
-
-		data.search_query = validator.escape(query);
-		if (searchIn === 'titles' || searchIn === 'titlesposts') {
-			searchIn = 'posts';
-		}
-
-		data.time = (process.elapsedTimeSince(start) / 1000).toFixed(2);
-		callback(null, data);
-	}
 
 	var start = process.hrtime();
-
-	var query = data.query;
 	var searchIn = data.searchIn || 'titlesposts';
 
-	if (searchIn === 'posts' || searchIn === 'titles' || searchIn === 'titlesposts') {
-		searchInContent(data, done);
-	} else if (searchIn === 'users') {
-		user.search(data, done);
-	} else if (searchIn === 'tags') {
-		topics.searchAndLoadTags(data, done);
-	} else {
-		callback(new Error('[[error:unknown-search-filter]]'));
-	}
+	async.waterfall([
+		function (next) {
+			if (searchIn === 'posts' || searchIn === 'titles' || searchIn === 'titlesposts') {
+				searchInContent(data, next);
+			} else if (searchIn === 'users') {
+				user.search(data, next);
+			} else if (searchIn === 'tags') {
+				topics.searchAndLoadTags(data, next);
+			} else {
+				next(new Error('[[error:unknown-search-filter]]'));
+			}
+		},
+		function (result, next) {
+			result.search_query = validator.escape(String(data.query || ''));
+			result.time = (process.elapsedTimeSince(start) / 1000).toFixed(2);
+			next(null, result);
+		}
+	], callback);
 };
 
 function searchInContent(data, callback) {
@@ -91,7 +85,9 @@ function searchInContent(data, callback) {
 					topics.getMainPids(results.tids, next);
 				},
 				function(mainPids, next) {
-					results.pids = mainPids.concat(results.pids).filter(function(pid, index, array) {
+					results.pids = mainPids.concat(results.pids).map(function(pid) {
+						return pid && pid.toString();
+					}).filter(function(pid, index, array) {
 						return pid && array.indexOf(pid) === index;
 					});
 
@@ -302,10 +298,10 @@ function filterByTimerange(posts, timeRange, timeFilter) {
 }
 
 function sortPosts(posts, data) {
-	if (!posts.length) {
+	if (!posts.length || !data.sortBy) {
 		return;
 	}
-	data.sortBy = data.sortBy || 'timestamp';
+
 	data.sortDirection = data.sortDirection || 'desc';
 	var direction = data.sortDirection === 'desc' ? 1 : -1;
 

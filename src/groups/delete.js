@@ -1,9 +1,9 @@
 'use strict';
 
-var async = require('async'),
-	plugins = require('../plugins'),
-	utils = require('../../public/src/utils'),
-	db = require('./../database');
+var async = require('async');
+var plugins = require('../plugins');
+var utils = require('../../public/src/utils');
+var db = require('./../database');
 
 module.exports = function(Groups) {
 
@@ -16,6 +16,7 @@ module.exports = function(Groups) {
 				return callback();
 			}
 			var groupObj = groupsData[0];
+
 			plugins.fireHook('action:group.destroy', groupObj);
 
 			async.parallel([
@@ -39,7 +40,13 @@ module.exports = function(Groups) {
 						}, next);
 					});
 				}
-			], callback);
+			], function(err) {
+				if (err) {
+					return callback(err);
+				}
+				Groups.resetCache();
+				callback();
+			});
 		});
 	};
 };

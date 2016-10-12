@@ -2,9 +2,9 @@
 
 'use strict';
 
-var async = require('async'),
-	winston = require('winston'),
-	db = require('../database');
+var async = require('async');
+var db = require('../database');
+var plugins = require('../plugins');
 
 module.exports = function(Topics) {
 	var terms = {
@@ -42,18 +42,41 @@ module.exports = function(Topics) {
 	Topics.updateTimestamp = function(tid, timestamp, callback) {
 		async.parallel([
 			function(next) {
-				Topics.updateRecent(tid, timestamp, next);
+				async.waterfall([
+					function (next) {
+						Topics.getTopicField(tid, 'deleted', next);
+					},
+					function (deleted, next) {
+						if (parseInt(deleted, 10) === 1) {
+							return next();
+						}
+						Topics.updateRecent(tid, timestamp, next);
+					}
+				], next);
 			},
 			function(next) {
 				Topics.setTopicField(tid, 'lastposttime', timestamp, next);
 			}
-		], function(err, results) {
+		], function(err) {
 			callback(err);
 		});
 	};
 
 	Topics.updateRecent = function(tid, timestamp, callback) {
 		callback = callback || function() {};
-		db.sortedSetAdd('topics:recent', timestamp, tid, callback);
+		if (plugins.hasListeners('filter:topics.updateRecent')) {
+			plugins.fireHook('filter:topics.updateRecent', {tid: tid, timestamp: timestamp}, function(err, data) {
+				if (err) {
+					return callback(err);
+				}
+				if (data && data.tid && data.timestamp) {
+					db.sortedSetAdd('topics:recent', data.timestamp, data.tid, callback);
+				} else {
+					callback();
+				}
+			});
+		} else {
+			db.sortedSetAdd('topics:recent', timestamp, tid, callback);
+		}
 	};
 };

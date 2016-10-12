@@ -1,13 +1,12 @@
 'use strict';
 
-/* globals define, app, socket, templates, translator */
+/* globals define, app, socket, templates */
 
 define('forum/topic/move', function() {
 
 	var Move = {},
 		modal,
-		targetCid,
-		targetCategoryLabel;
+		selectedEl;
 
 	Move.init = function(tids, currentCid, onComplete) {
 		Move.tids = tids;
@@ -15,7 +14,7 @@ define('forum/topic/move', function() {
 		Move.onComplete = onComplete;
 		Move.moveAll = tids ? false : true;
 
-		socket.emit('categories.get', onCategoriesLoaded);
+		socket.emit('categories.getMoveCategories', onCategoriesLoaded);
 	};
 
 	function onCategoriesLoaded(err, categories) {
@@ -23,8 +22,7 @@ define('forum/topic/move', function() {
 			return app.alertError(err.message);
 		}
 
-		parseModal(categories, function(html) {
-			modal = $(html);
+		parseModal(categories, function() {
 
 			modal.on('hidden.bs.modal', function() {
 				modal.remove();
@@ -36,7 +34,7 @@ define('forum/topic/move', function() {
 				modal.find('.modal-header h3').translateText('[[topic:move_topics]]');
 			}
 
-			modal.on('click', '.category-list li[data-cid]', function(e) {
+			modal.on('click', '.category-list li[data-cid]', function() {
 				selectCategory($(this));
 			});
 
@@ -47,8 +45,45 @@ define('forum/topic/move', function() {
 	}
 
 	function parseModal(categories, callback) {
-		templates.parse('partials/move_thread_modal', {categories: categories}, function(html) {
-			translator.translate(html, callback);
+		templates.parse('partials/move_thread_modal', {categories: []}, function(html) {
+			require(['translator'], function(translator) {
+				translator.translate(html, function(html) {
+					modal = $(html);
+					categories.forEach(function(category) {
+						if (!category.link) {
+							buildRecursive(modal.find('.category-list'), category, '');
+						}
+					});
+					callback();
+				});
+			});
+		});
+	}
+
+	function buildRecursive(parentEl, category, level) {
+		var categoryEl = $('<li/>');
+
+		if (category.bgColor) {
+			categoryEl.css('background-color', category.bgColor);
+		}
+		if (category.color) {
+			categoryEl.css('color', category.color);
+		}
+		categoryEl.toggleClass('disabled', !!category.disabled);
+		categoryEl.attr('data-cid', category.cid);
+		categoryEl.attr('data-icon', category.icon);
+		categoryEl.attr('data-name', category.name);
+		categoryEl.html('<i class="fa fa-fw ' + category.icon + '"></i> ' + category.name);
+
+		parentEl.append(level);
+		parentEl.append(categoryEl);
+		parentEl.append('<br/>');
+
+		var indent = '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;';
+		category.children.forEach(function(childCategory) {
+			if (!childCategory.link) {
+				buildRecursive(parentEl, childCategory, indent + level);
+			}
 		});
 	}
 
@@ -56,15 +91,14 @@ define('forum/topic/move', function() {
 		modal.find('#confirm-category-name').html(category.html());
 		modal.find('#move-confirm').removeClass('hide');
 
-		targetCid = category.attr('data-cid');
-		targetCategoryLabel = category.html();
+		selectedEl = category;
 		modal.find('#move_thread_commit').prop('disabled', false);
 	}
 
 	function onCommitClicked() {
 		var commitEl = modal.find('#move_thread_commit');
 
-		if (!commitEl.prop('disabled') && targetCid) {
+		if (!commitEl.prop('disabled') && selectedEl.attr('data-cid')) {
 			commitEl.prop('disabled', true);
 
 			moveTopics();
@@ -74,7 +108,7 @@ define('forum/topic/move', function() {
 	function moveTopics() {
 		socket.emit(Move.moveAll ? 'topics.moveAll' : 'topics.move', {
 			tids: Move.tids,
-			cid: targetCid,
+			cid: selectedEl.attr('data-cid'),
 			currentCid: Move.currentCid
 		}, function(err) {
 			modal.modal('hide');
@@ -83,7 +117,7 @@ define('forum/topic/move', function() {
 				return app.alertError(err.message);
 			}
 
-			app.alertSuccess('[[topic:topic_move_success, ' + targetCategoryLabel + ']]');
+			app.alertSuccess('[[topic:topic_move_success, ' + selectedEl.attr('data-name') + ']] <i class="fa fa-fw ' + selectedEl.attr('data-icon') + '"></i>');
 			if (typeof Move.onComplete === 'function') {
 				Move.onComplete();
 			}

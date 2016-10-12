@@ -29,6 +29,10 @@ module.exports = function(SocketUser) {
 		}
 
 		user.isAdministrator(socket.uid, function(err, isAdmin) {
+			if (err) {
+				return callback(err);
+			}
+
 			if (!isAdmin && data.uid !== socket.uid) {
 				return callback(new Error('[[error:no-privileges]]'));
 			}
@@ -42,11 +46,10 @@ module.exports = function(SocketUser) {
 			return callback(new Error('[[error:no-privileges]]'));
 		}
 
-		user.isAdministrator(socket.uid, function(err, isAdmin) {
-			if (!isAdmin && data.uid !== socket.uid) {
-				return callback(new Error('[[error:no-privileges]]'));
+		user.isAdminOrSelf(socket.uid, data.uid, function(err) {
+			if (err) {
+				return callback(err);
 			}
-
 			user.removeCoverPicture(data, callback);
 		});
 	};
@@ -55,7 +58,13 @@ module.exports = function(SocketUser) {
 		async.parallel({
 			isAdmin: async.apply(user.isAdministrator, uid),
 			hasPassword: async.apply(user.hasPassword, data.uid),
-			passwordMatch: async.apply(user.isPasswordCorrect, data.uid, data.password)
+			passwordMatch: function(next) {
+				if (data.password) {
+					user.isPasswordCorrect(data.uid, data.password, next);
+				} else {
+					next(null, false);
+				}
+			}
 		}, function(err, results) {
 			if (err) {
 				return callback(err);
@@ -75,7 +84,7 @@ module.exports = function(SocketUser) {
 	}
 
 	SocketUser.changePassword = function(socket, data, callback) {
-		if (!data || !data.uid || data.newPassword.length < meta.config.minimumPasswordLength) {
+		if (!data || !data.uid) {
 			return callback(new Error('[[error:invalid-data]]'));
 		}
 		if (!socket.uid) {
@@ -117,12 +126,21 @@ module.exports = function(SocketUser) {
 					return next(new Error('[[error:invalid-data]]'));
 				}
 
-				if (parseInt(meta.config['username:disableEdit'], 10) === 1) {
+				user.isAdminOrGlobalMod(socket.uid, next);
+			},
+			function(isAdminOrGlobalMod, next) {
+				if (!isAdminOrGlobalMod && socket.uid !== parseInt(data.uid, 10)) {
+					return next(new Error('[[error:no-privileges]]'));
+				}
+
+				if (!isAdminOrGlobalMod && parseInt(meta.config['username:disableEdit'], 10) === 1) {
 					data.username = oldUserData.username;
 				}
-				user.isAdminOrSelf(socket.uid, data.uid, next);
-			},
-			function (next) {
+
+				if (!isAdminOrGlobalMod && parseInt(meta.config['email:disableEdit'], 10) === 1) {
+					data.email = oldUserData.email;
+				}
+
 				user.updateProfile(data.uid, data, next);
 			},
 			function (userData, next) {

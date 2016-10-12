@@ -7,6 +7,7 @@
 
 	"email": "Email",
 	"confirm_email": "Confirm Email",
+	"account_info": "Account Info",
 	"ban_account": "Ban Account",
 	"ban_account_confirm": "Do you really want to ban this user?",
 	"unban_account": "Unban Account",
@@ -24,7 +25,7 @@
 	"profile": "Profile",
 	"profile_views": "Profile views",
 	"reputation": "Reputation",
-	"favourites":"Favourites",
+	"bookmarks":"Bookmarks",
 	"watched": "Watched",
 	"followers": "Followers",
 	"following": "Following",
@@ -42,6 +43,7 @@
 	"change_username": "Change Username",
 	"change_email": "Change Email",
 	"edit": "Edit",
+	"edit-profile": "Edit Profile",
 	"default_picture": "Default Icon",
 	"uploaded_picture": "Uploaded Picture",
 	"upload_new_picture": "Upload New Picture",
@@ -58,11 +60,12 @@
 	"password": "Password",
 	"username_taken_workaround": "The username you requested was already taken, so we have altered it slightly. You are now known as <strong>%1</strong>",
 	"password_same_as_username": "Your password is the same as your username, please select another password.",
+	"password_same_as_email": "Your password is the same as your email, please select another password.",
 
 	"upload_picture": "Upload picture",
 	"upload_a_picture": "Upload a picture",
 	"remove_uploaded_picture" : "Remove Uploaded Picture",
-	"image_spec": "You may only upload PNG, JPG, or BMP files",
+	"upload_cover_picture": "Upload cover picture",
 
 	"settings": "Settings",
 	"show_email": "Show My Email",
@@ -83,6 +86,9 @@
 	"has_no_posts": "This user hasn't posted anything yet.",
 	"has_no_topics": "This user hasn't posted any topics yet.",
 	"has_no_watched_topics": "This user hasn't watched any topics yet.",
+	"has_no_upvoted_posts": "This user hasn't upvoted any posts yet.",
+	"has_no_downvoted_posts": "This user hasn't downvoted any posts yet.",
+	"has_no_voted_posts": "This user has no voted posts",
 
 	"email_hidden": "Email Hidden",
 	"hidden": "hidden",
@@ -92,6 +98,11 @@
 	"posts_per_page": "Posts per Page",
 
 	"notification_sounds" : "Play a sound when you receive a notification",
+	"notifications_and_sounds": "Notifications & Sounds",
+	"incoming-message-sound": "Incoming message sound",
+	"outgoing-message-sound": "Outgoing message sound",
+	"notification-sound": "Notification sound",
+	"no-sound": "No sound",
 
 	"browsing": "Browsing Settings",
 	"open_links_in_new_tab": "Open outgoing links in new tab",
@@ -99,10 +110,15 @@
 	"enable_topic_searching": "Enable In-Topic Searching",
 	"topic_search_help": "If enabled, in-topic searching will override the browser's default page search behaviour and allow you to search through the entire topic, instead of what is only shown on screen",
 
-	"follow_topics_you_reply_to": "Follow topics that you reply to",
-	"follow_topics_you_create": "Follow topics you create",
+	"delay_image_loading": "Delay Image Loading",
+	"image_load_delay_help": "If enabled, images in topics will not load until they are scrolled into view",
 
-	"grouptitle": "Select the group title you would like to display",
+	"scroll_to_my_post": "After posting a reply, show the new post",
+
+	"follow_topics_you_reply_to": "Watch topics that you reply to",
+	"follow_topics_you_create": "Watch topics you create",
+
+	"grouptitle": "Group Title",
 	"no-group-title": "No group title",
 
 	"select-skin": "Select a Skin",
@@ -115,5 +131,18 @@
 
 	"sso.title": "Single Sign-on Services",
 	"sso.associated": "Associated with",
-	"sso.not-associated": "Click here to associate with"
+	"sso.not-associated": "Click here to associate with",
+
+	"info.latest-flags": "Latest Flags",
+	"info.no-flags": "No Flagged Posts Found",
+	"info.ban-history": "Recent Ban History",
+	"info.no-ban-history": "This user has never been banned",
+	"info.banned-until": "Banned until %1",
+	"info.banned-permanently": "Banned permanently",
+	"info.banned-reason-label": "Reason",
+	"info.banned-no-reason": "No reason given.",
+	"info.username-history": "Username History",
+	"info.email-history": "Email History",
+	"info.moderation-note": "Moderation Note",
+	"info.moderation-note.success": "Moderation note saved"
 }

@@ -1,14 +1,15 @@
 
 'use strict';
 
-var nconf = require('nconf'),
-	topics = require('../topics'),
-	meta = require('../meta'),
-	helpers = require('./helpers');
+var nconf = require('nconf');
+var topics = require('../topics');
+var meta = require('../meta');
+var helpers = require('./helpers');
 
 var popularController = {};
 
-var anonCache = {}, lastUpdateTime = 0;
+var anonCache = {};
+var lastUpdateTime = 0;
 
 var terms = {
 	daily: 'day',
@@ -47,7 +48,8 @@ popularController.get = function(req, res, next) {
 			topics: topics,
 			'feeds:disableRSS': parseInt(meta.config['feeds:disableRSS'], 10) === 1,
 			rssFeedUrl: nconf.get('relative_path') + '/popular/' + (req.params.term || 'daily') + '.rss',
-			title: '[[pages:popular-' + term + ']]'
+			title: '[[pages:popular-' + term + ']]',
+			term: term
 		};
 
 		if (req.path.startsWith('/api/popular') || req.path.startsWith('/popular')) {

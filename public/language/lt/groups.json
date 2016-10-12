@@ -24,6 +24,7 @@
     "details.has_no_posts": "Šios grupės nariai neatliko jokių įrašų.",
     "details.latest_posts": "Vėliausi įrašai",
     "details.private": "Asmeniška",
+    "details.disableJoinRequests": "Disable join requests",
     "details.grant": "Duoti/Atšaukti Nuosavybę",
     "details.kick": "Išmesti",
     "details.owner_options": "Grupės Administratorius",
@@ -40,6 +41,7 @@
     "details.hidden": "Paslėptas",
     "details.hidden_help": "Jeigu įjungta, ši grupė bus nerodo grupių sąraše, ir vartotojus reikės kviest rankiniu būdu",
     "details.delete_group": "Ištrinti grupe",
+    "details.private_system_help": "Private groups is disabled at system level, this option does not do anything",
     "event.updated": "Grupės informacija atnaujinta",
     "event.deleted": "Grupė \"%1\" pašalinta",
     "membership.accept-invitation": "Priimti Kvietimą",
@@ -47,5 +49,8 @@
     "membership.join-group": "Prisijungti Prie Grupės",
     "membership.leave-group": "Palikti Grupę",
     "membership.reject": "Atšaukti",
-    "new-group.group_name": "Group Name:"
+    "new-group.group_name": "Group Name:",
+    "upload-group-cover": "Upload group cover",
+    "bulk-invite-instructions": "Enter a list of comma separated usernames to invite to this group",
+    "bulk-invite": "Bulk Invite"
 }

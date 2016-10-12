@@ -1,11 +1,10 @@
 
 'use strict';
 
-var async = require('async'),
-	meta = require('../meta'),
-	pagination = require('../pagination'),
-	plugins = require('../plugins'),
-	db = require('../database');
+var async = require('async');
+var meta = require('../meta');
+var plugins = require('../plugins');
+var db = require('../database');
 
 module.exports = function(User) {
 
@@ -42,9 +41,11 @@ module.exports = function(User) {
 				searchResult.matchCount = uids.length;
 
 				if (paginate) {
-					var pagination = User.paginate(page, uids);
-					uids = pagination.data;
-					searchResult.pagination = pagination.pagination;
+					var resultsPerPage = parseInt(meta.config.userSearchResultsPerPage, 10) || 20;
+					var start = Math.max(0, page - 1) * resultsPerPage;
+					var stop = start + resultsPerPage;
+					searchResult.pageCount = Math.ceil(uids.length / resultsPerPage);
+					uids = uids.slice(start, stop);
 				}
 
 				User.getUsers(uids, uid, next);
@@ -55,21 +56,6 @@ module.exports = function(User) {
 				next(null, searchResult);
 			}
 		], callback);
-	};
-
-	User.paginate = function(page, data) {
-		var resultsPerPage = parseInt(meta.config.userSearchResultsPerPage, 10) || 20;
-		var start = Math.max(0, page - 1) * resultsPerPage;
-		var stop = start + resultsPerPage;
-
-		var pageCount = Math.ceil(data.length / resultsPerPage);
-		var currentPage = Math.max(1, Math.ceil((start + 1) / resultsPerPage));
-
-		return {
-			pagination: pagination.create(currentPage, pageCount),
-			pageCount: pageCount,
-			data: data.slice(start, stop)
-		};
 	};
 
 	function findUids(query, searchBy, callback) {
@@ -98,7 +84,16 @@ module.exports = function(User) {
 	function filterAndSortUids(uids, data, callback) {
 		var sortBy = data.sortBy || 'joindate';
 
-		var fields = ['uid', 'status', 'lastonline', sortBy];
+		var fields = ['uid', sortBy];
+		if (data.onlineOnly) {
+			fields = fields.concat(['status', 'lastonline']);
+		}
+		if (data.bannedOnly) {
+			fields.push('banned');
+		}
+		if (data.flaggedOnly) {
+			fields.push('flags');
+		}
 
 		User.getUsersFields(uids, fields, function(err, userData) {
 			if (err) {
@@ -108,6 +103,18 @@ module.exports = function(User) {
 			if (data.onlineOnly) {
 				userData = userData.filter(function(user) {
 					return user && user.status !== 'offline' && (Date.now() - parseInt(user.lastonline, 10) < 300000);
+				});
+			}
+
+			if (data.bannedOnly) {
+				userData = userData.filter(function(user) {
+					return user && user.banned;
+				});
+			}
+
+			if (data.flaggedOnly) {
+				userData = userData.filter(function(user) {
+					return user && parseInt(user.flags, 10) > 0;
 				});
 			}
 
@@ -122,7 +129,7 @@ module.exports = function(User) {
 	}
 
 	function sortUsers(userData, sortBy) {
-		if (sortBy === 'joindate' || sortBy === 'postcount') {
+		if (sortBy === 'joindate' || sortBy === 'postcount' || sortBy === 'reputation') {
 			userData.sort(function(u1, u2) {
 				return u2[sortBy] - u1[sortBy];
 			});

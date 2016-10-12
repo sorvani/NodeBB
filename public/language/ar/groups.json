@@ -24,6 +24,7 @@
     "details.has_no_posts": "أعضاء هذه المجموعة لم يضيفوا أية مشاركة",
     "details.latest_posts": "آخر المشاركات",
     "details.private": "خاص",
+    "details.disableJoinRequests": "Disable join requests",
     "details.grant": "منح/سحب المِلكية",
     "details.kick": "طرد",
     "details.owner_options": "إدارة المجموعة",
@@ -40,6 +41,7 @@
     "details.hidden": "مخفي",
     "details.hidden_help": "في حالة تفعيل الخيار، لن تظهر المجموعة للعموم والإنضمام إليها سيتلزم دعوة.",
     "details.delete_group": "حذف المجموعة",
+    "details.private_system_help": "Private groups is disabled at system level, this option does not do anything",
     "event.updated": "تم تحديث بيانات المجموعة",
     "event.deleted": "تم حذف المجموعة %1",
     "membership.accept-invitation": "اقبل الدعوة",
@@ -47,5 +49,8 @@
     "membership.join-group": "انظم للمجموعة",
     "membership.leave-group": "غادر المجموعة",
     "membership.reject": "رفض",
-    "new-group.group_name": "اسم المجموعة"
+    "new-group.group_name": "اسم المجموعة",
+    "upload-group-cover": "Upload group cover",
+    "bulk-invite-instructions": "Enter a list of comma separated usernames to invite to this group",
+    "bulk-invite": "Bulk Invite"
 }

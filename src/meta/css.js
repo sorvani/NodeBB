@@ -1,18 +1,19 @@
 'use strict';
 
-var winston = require('winston'),
-	nconf = require('nconf'),
-	fs = require('fs'),
-	path = require('path'),
-	less = require('less'),
-	crypto = require('crypto'),
-	async = require('async'),
+var winston = require('winston');
+var nconf = require('nconf');
+var fs = require('fs');
+var path = require('path');
+var less = require('less');
+var async = require('async');
+var autoprefixer = require('autoprefixer');
+var postcss = require('postcss');
 
-	plugins = require('../plugins'),
-	emitter = require('../emitter'),
-	db = require('../database'),
-	file = require('../file'),
-	utils = require('../../public/src/utils');
+var plugins = require('../plugins');
+var emitter = require('../emitter');
+var db = require('../database');
+var file = require('../file');
+var utils = require('../../public/src/utils');
 
 module.exports = function(Meta) {
 
@@ -38,8 +39,7 @@ module.exports = function(Meta) {
 				paths = [
 					baseThemePath,
 					path.join(__dirname, '../../node_modules'),
-					path.join(__dirname, '../../public/vendor/fontawesome/less'),
-					path.join(__dirname, '../../public/vendor/bootstrap/less')
+					path.join(__dirname, '../../public/vendor/fontawesome/less')
 				],
 				source = '@import "font-awesome";';
 
@@ -63,24 +63,41 @@ module.exports = function(Meta) {
 					return callback(err);
 				}
 
-				source += '\n@import (inline) "..' + path.sep + '..' + path.sep + 'public/vendor/jquery/css/smoothness/jquery-ui-1.10.4.custom.min.css";';
+				var acpSource = source;
+
+				source += '\n@import (inline) "..' + path.sep + '..' + path.sep + 'public/vendor/jquery/css/smoothness/jquery-ui.css";';
 				source += '\n@import (inline) "..' + path.sep + '..' + path.sep + 'public/vendor/jquery/bootstrap-tagsinput/bootstrap-tagsinput.css";';
-				source += '\n@import (inline) "..' + path.sep + '..' + path.sep + 'public/vendor/jquery/textcomplete/jquery.textcomplete.css";';
-				source += '\n@import (inline) "..' + path.sep + '..' + path.sep + 'public/vendor/colorpicker/colorpicker.css";';
+				source += '\n@import (inline) "..' + path.sep + 'public/vendor/colorpicker/colorpicker.css";';
+				source += '\n@import "..' + path.sep + '..' + path.sep + 'public/less/flags.less";';
+				source += '\n@import "..' + path.sep + '..' + path.sep + 'public/less/blacklist.less";';
 				source += '\n@import "..' + path.sep + '..' + path.sep + 'public/less/generics.less";';
 				source += '\n@import "..' + path.sep + '..' + path.sep + 'public/less/mixins.less";';
-
-				var acpSource = '\n@import "..' + path.sep + 'public/less/admin/admin";\n' + source;
-				acpSource += '\n@import "..' + path.sep + 'public/less/generics.less";';
-				acpSource += '\n@import (inline) "..' + path.sep + 'public/vendor/colorpicker/colorpicker.css";';
-
+				source += '\n@import "..' + path.sep + '..' + path.sep + 'public/less/global.less";';
 				source = '@import "./theme";\n' + source;
 
-				async.parallel([
+				acpSource += '\n@import "..' + path.sep + 'public/less/admin/admin";\n';
+				acpSource += '\n@import "..' + path.sep + 'public/less/generics.less";\n';
+				acpSource += '\n@import (inline) "..' + path.sep + 'public/vendor/colorpicker/colorpicker.css";\n';
+				acpSource += '\n@import (inline) "..' + path.sep + 'public/vendor/jquery/css/smoothness/jquery-ui.css";';
+
+
+				var fromFile = nconf.get('from-file') || '';
+				
+				async.series([
 					function(next) {
+						if (fromFile.match('clientLess')) {
+							winston.info('[minifier] Compiling front-end LESS files skipped');
+							return Meta.css.getFromFile(path.join(__dirname, '../../public/stylesheet.css'), 'cache', next);
+						}
+
 						minify(source, paths, 'cache', next);
 					},
 					function(next) {
+						if (fromFile.match('acpLess')) {
+							winston.info('[minifier] Compiling ACP LESS files skipped');
+							return Meta.css.getFromFile(path.join(__dirname, '../../public/admin.css'), 'acpCache', next);
+						}
+						
 						minify(acpSource, paths, 'acpCache', next);
 					}
 				], function(err, minified) {
@@ -92,8 +109,8 @@ module.exports = function(Meta) {
 					if (process.send) {
 						process.send({
 							action: 'css-propagate',
-							cache: minified[0],
-							acpCache: minified[1]
+							cache: fromFile.match('clientLess') ? Meta.css.cache : minified[0],
+							acpCache: fromFile.match('acpLess') ? Meta.css.acpCache : minified[1]
 						});
 					}
 
@@ -134,7 +151,7 @@ module.exports = function(Meta) {
 		});
 	}
 
-	Meta.css.commitToFile = function(filename) {
+	Meta.css.commitToFile = function(filename, callback) {
 		var file = (filename === 'acpCache' ? 'admin' : 'stylesheet') + '.css';
 
 		fs.writeFile(path.join(__dirname, '../../public/' + file), Meta.css[filename], function(err) {
@@ -144,31 +161,21 @@ module.exports = function(Meta) {
 				winston.error('[meta/css] ' + err.message);
 				process.exit(0);
 			}
+
+			callback();
 		});
 	};
 
-	Meta.css.getFromFile = function(callback) {
-		var cachePath = path.join(__dirname, '../../public/stylesheet.css'),
-			acpCachePath = path.join(__dirname, '../../public/admin.css');
-		file.exists(cachePath, function(exists) {
-			if (!exists) {
-				winston.warn('[meta/css] No stylesheets found on disk, re-minifying');
-				Meta.css.minify(callback);
-				return;
+	Meta.css.getFromFile = function(filePath, filename, callback) {
+		winston.verbose('[meta/css] Reading stylesheet ' + filePath.split('/').pop() + ' from file');
+
+		fs.readFile(filePath, function(err, file) {
+			if (err) {
+				return callback(err);
 			}
 
-			if (nconf.get('isPrimary') !== 'true') {
-				return callback();
-			}
-
-			winston.verbose('[meta/css] Reading stylesheets from file');
-			async.map([cachePath, acpCachePath], fs.readFile, function(err, files) {
-				Meta.css.cache = files[0];
-				Meta.css.acpCache = files[1];
-
-				emitter.emit('meta:css.compiled');
-				callback();
-			});
+			Meta.css[filename] = file;
+			callback();
 		});
 	};
 
@@ -185,16 +192,27 @@ module.exports = function(Meta) {
 				return;
 			}
 
-			Meta.css[destination] = lessOutput.css;
+			postcss([ autoprefixer ]).process(lessOutput.css).then(function (result) {
+				result.warnings().forEach(function (warn) {
+					winston.verbose(warn.toString());
+				});
 
-			// Save the compiled CSS in public/ so things like nginx can serve it
-			if (nconf.get('isPrimary') === 'true') {
-				Meta.css.commitToFile(destination);
-			}
+				Meta.css[destination] = result.css;
 
-			if (typeof callback === 'function') {
-				callback(null, lessOutput.css);
-			}
+				// Save the compiled CSS in public/ so things like nginx can serve it
+				if (nconf.get('isPrimary') === 'true' && (nconf.get('local-assets') === undefined || nconf.get('local-assets') !== false)) {
+					return Meta.css.commitToFile(destination, function() {
+						if (typeof callback === 'function') {
+							callback(null, result.css);
+						}
+					});
+				}
+
+				if (typeof callback === 'function') {
+					callback(null, result.css);
+				}
+			});
+
 		});
 	}
 

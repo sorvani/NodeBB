@@ -4,6 +4,10 @@ var topics = require('../../topics');
 var utils = require('../../../public/src/utils');
 
 module.exports = function(SocketTopics) {
+	SocketTopics.autocompleteTags = function(socket, data, callback) {
+		topics.autocompleteTags(data, callback);
+	};
+
 	SocketTopics.searchTags = function(socket, data, callback) {
 		topics.searchTags(data, callback);
 	};
@@ -20,14 +24,14 @@ module.exports = function(SocketTopics) {
 			return callback(new Error('[[error:invalid-data]]'));
 		}
 
-		var start = parseInt(data.after, 10),
-			stop = start + 99;
+		var start = parseInt(data.after, 10);
+		var stop = start + 99;
 
 		topics.getTags(start, stop, function(err, tags) {
 			if (err) {
 				return callback(err);
 			}
-
+			tags = tags.filter(Boolean);
 			callback(null, {tags: tags, nextStart: stop + 1});
 		});
 	};

@@ -24,19 +24,20 @@ var	pidFilePath = __dirname + '/pidfile',
 	Loader = {
 		timesStarted: 0,
 		js: {
-			cache: undefined,
-			map: undefined
+			target: {}
 		},
 		css: {
 			cache: undefined,
 			acpCache: undefined
-		}
+		},
+		templatesCompiled: false
 	};
 
 Loader.init = function(callback) {
 	if (silent) {
-		console.log = function(value) {
-			output.write(value + '\n');
+		console.log = function() {
+			var args = Array.prototype.slice.call(arguments);
+			output.write(args.join(' ') + '\n');
 		};
 	}
 
@@ -86,11 +87,10 @@ Loader.addWorkerEvents = function(worker) {
 		if (message && typeof message === 'object' && message.action) {
 			switch (message.action) {
 				case 'ready':
-					if (Loader.js.cache && !worker.isPrimary) {
+					if (Loader.js.target['nodebb.min.js'] && Loader.js.target['acp.min.js'] && !worker.isPrimary) {
 						worker.send({
 							action: 'js-propagate',
-							cache: Loader.js.cache,
-							map: Loader.js.map
+							data: Loader.js.target
 						});
 					}
 
@@ -99,6 +99,12 @@ Loader.addWorkerEvents = function(worker) {
 							action: 'css-propagate',
 							cache: Loader.css.cache,
 							acpCache: Loader.css.acpCache
+						});
+					}
+
+					if (Loader.templatesCompiled && !worker.isPrimary) {
+						worker.send({
+							action: 'templates:compiled'
 						});
 					}
 
@@ -113,13 +119,11 @@ Loader.addWorkerEvents = function(worker) {
 					Loader.reload();
 				break;
 				case 'js-propagate':
-					Loader.js.cache = message.cache;
-					Loader.js.map = message.map;
+					Loader.js.target = message.data;
 
 					Loader.notifyWorkers({
 						action: 'js-propagate',
-						cache: message.cache,
-						map: message.map
+						data: message.data
 					}, worker.pid);
 				break;
 				case 'css-propagate':
@@ -133,6 +137,8 @@ Loader.addWorkerEvents = function(worker) {
 					}, worker.pid);
 				break;
 				case 'templates:compiled':
+					Loader.templatesCompiled = true;
+
 					Loader.notifyWorkers({
 						action: 'templates:compiled',
 					}, worker.pid);
@@ -163,7 +169,7 @@ function forkWorker(index, isPrimary) {
 	}
 
 	process.env.isPrimary = isPrimary;
-	process.env.isCluster = true;
+	process.env.isCluster = ports.length > 1 ? true : false;
 	process.env.port = ports[index];
 
 	var worker = fork('app.js', [], {
@@ -201,7 +207,8 @@ function getPorts() {
 
 Loader.restart = function() {
 	killWorkers();
-
+	nconf.remove('file');
+	nconf.use('file', { file: path.join(__dirname, '/config.json') });
 	Loader.start();
 };
 

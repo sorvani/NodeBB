@@ -9,7 +9,10 @@ define('autocomplete', function() {
 	module.user = function (input, onselect) {
 		app.loadJQueryUI(function() {
 			input.autocomplete({
-				delay: 100,
+				delay: 200,
+				open: function() {
+					$(this).autocomplete('widget').css('z-index', 20000);
+				},
 				select: onselect,
 				source: function(request, response) {
 					socket.emit('user.search', {query: request.term}, function(err, result) {
@@ -19,9 +22,10 @@ define('autocomplete', function() {
 
 						if (result && result.users) {
 							var names = result.users.map(function(user) {
+								var username = $('<div/>').html(user.username).text()
 								return user && {
-									label: user.username,
-									value: user.username,
+									label: username,
+									value: username,
 									user: {
 										uid: user.uid,
 										name: user.username,
@@ -41,7 +45,7 @@ define('autocomplete', function() {
 	module.group = function(input, onselect) {
 		app.loadJQueryUI(function() {
 			input.autocomplete({
-				delay: 100,
+				delay: 200,
 				select: onselect,
 				source: function(request, response) {
 					socket.emit('groups.search', {

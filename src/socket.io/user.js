@@ -1,74 +1,85 @@
 'use strict';
 
-var	async = require('async'),
+var	async = require('async');
+var winston = require('winston');
 
+var user = require('../user');
+var topics = require('../topics');
+var notifications = require('../notifications');
+var messaging = require('../messaging');
+var plugins = require('../plugins');
+var meta = require('../meta');
+var events = require('../events');
+var emailer = require('../emailer');
+var db = require('../database');
+var apiController = require('../controllers/api');
 
-	user = require('../user'),
-	topics = require('../topics'),
-	notifications = require('../notifications'),
-	messaging = require('../messaging'),
-	plugins = require('../plugins'),
-	utils = require('../../public/src/utils'),
-	websockets = require('./index'),
-	meta = require('../meta'),
-	events = require('../events'),
-	emailer = require('../emailer'),
-	db = require('../database'),
-
-	SocketUser = {};
-
+var SocketUser = {};
 
 require('./user/profile')(SocketUser);
 require('./user/search')(SocketUser);
 require('./user/status')(SocketUser);
 require('./user/picture')(SocketUser);
+require('./user/ban')(SocketUser);
 
 SocketUser.exists = function(socket, data, callback) {
-	if (data && data.username) {
-		meta.userOrGroupExists(utils.slugify(data.username), callback);
+	if (!data || !data.username) {
+		return callback(new Error('[[error:invalid-data]]'));
 	}
+	meta.userOrGroupExists(data.username, callback);
 };
 
 SocketUser.deleteAccount = function(socket, data, callback) {
 	if (!socket.uid) {
-		return;
+		return callback(new Error('[[error:no-privileges]]'));
 	}
-	user.isAdministrator(socket.uid, function(err, isAdmin) {
-		if (err || isAdmin) {
-			return callback(err || new Error('[[error:cant-delete-admin]]'));
-		}
 
-		socket.broadcast.emit('event:user_status_change', {uid: socket.uid, status: 'offline'});
-		user.deleteAccount(socket.uid, function(err) {
-			if (err) {
-				return callback(err);
+	async.waterfall([
+		function (next) {
+			user.isAdministrator(socket.uid, next);
+		},
+		function (isAdmin, next) {
+			if (isAdmin) {
+				return next(new Error('[[error:cant-delete-admin]]'));
 			}
-			websockets.in('uid_' + socket.uid).emit('event:logout');
-			callback();
-		});
-	});
+			user.deleteAccount(socket.uid, next);
+		},
+		function (next) {
+			socket.broadcast.emit('event:user_status_change', {uid: socket.uid, status: 'offline'});
+
+			events.log({
+				type: 'user-delete',
+				uid: socket.uid,
+				targetUid: socket.uid,
+				ip: socket.ip
+			});
+			next();
+		}
+	], callback);
 };
 
 SocketUser.emailExists = function(socket, data, callback) {
-	if (data && data.email) {
-		user.email.exists(data.email, callback);
+	if (!data || !data.email) {
+		return callback(new Error('[[error:invalid-data]]'));
 	}
+	user.email.exists(data.email, callback);
 };
 
 SocketUser.emailConfirm = function(socket, data, callback) {
-	if (socket.uid && parseInt(meta.config.requireEmailConfirmation, 10) === 1) {
-		user.getUserField(socket.uid, 'email', function(err, email) {
-			if (err) {
-				return callback(err);
-			}
-
-			if (!email) {
-				return;
-			}
-
-			user.email.sendValidationEmail(socket.uid, email, callback);
-		});
+	if (!socket.uid) {
+		return callback(new Error('[[error:no-privileges]]'));
 	}
+
+	if (parseInt(meta.config.requireEmailConfirmation, 10) !== 1) {
+		callback();
+	}
+	user.getUserField(socket.uid, 'email', function(err, email) {
+		if (err || !email) {
+			return callback(err);
+		}
+
+		user.email.sendValidationEmail(socket.uid, email, callback);
+	});
 };
 
 
@@ -76,9 +87,21 @@ SocketUser.emailConfirm = function(socket, data, callback) {
 SocketUser.reset = {};
 
 SocketUser.reset.send = function(socket, email, callback) {
-	if (email) {
-		user.reset.send(email, callback);
+	if (!email) {
+		return callback(new Error('[[error:invalid-data]]'));
 	}
+
+	user.reset.send(email, function(err) {
+		if (err && err.message !== '[[error:invalid-email]]') {
+			return callback(err);
+		}
+		if (err && err.message === '[[error:invalid-email]]') {
+			winston.verbose('[user/reset] Invalid email attempt: ' + email);
+			return setTimeout(callback, 2500);
+		}
+
+		callback();
+	});
 };
 
 SocketUser.reset.commit = function(socket, data, callback) {
@@ -94,11 +117,15 @@ SocketUser.reset.commit = function(socket, data, callback) {
 			return callback(err);
 		}
 
-		var uid = results.uid,
-			now = new Date(),
-			parsedDate = now.getFullYear() + '/' + (now.getMonth()+1) + '/' + now.getDate();
+		var uid = results.uid;
+		var now = new Date();
+		var parsedDate = now.getFullYear() + '/' + (now.getMonth()+1) + '/' + now.getDate();
 
 		user.getUserField(uid, 'username', function(err, username) {
+			if (err) {
+				return callback(err);
+			}
+
 			emailer.send('reset_notify', uid, {
 				username: username,
 				date: parsedDate,
@@ -126,26 +153,30 @@ SocketUser.isFollowing = function(socket, data, callback) {
 
 SocketUser.follow = function(socket, data, callback) {
 	if (!socket.uid || !data) {
-		return;
+		return callback(new Error('[[error:invalid-data]]'));
 	}
 	var userData;
 	async.waterfall([
-		function(next) {
+		function (next) {
 			toggleFollow('follow', socket.uid, data.uid, next);
 		},
-		function(next) {
+		function (next) {
 			user.getUserFields(socket.uid, ['username', 'userslug'], next);
 		},
-		function(_userData, next) {
+		function (_userData, next) {
 			userData = _userData;
 			notifications.create({
 				bodyShort: '[[notifications:user_started_following_you, ' + userData.username + ']]',
 				nid: 'follow:' + data.uid + ':uid:' + socket.uid,
 				from: socket.uid,
-				path: '/user/' + userData.userslug
+				path: '/uid/' + socket.uid,
+				mergeId: 'notifications:user_started_following_you'
 			}, next);
 		},
-		function(notification, next) {
+		function (notification, next) {
+			if (!notification) {
+				return next();
+			}
 			notification.user = userData;
 			notifications.push(notification, [data.uid], next);
 		}
@@ -153,9 +184,10 @@ SocketUser.follow = function(socket, data, callback) {
 };
 
 SocketUser.unfollow = function(socket, data, callback) {
-	if (socket.uid && data) {
-		toggleFollow('unfollow', socket.uid, data.uid, callback);
+	if (!socket.uid || !data) {
+		return callback(new Error('[[error:invalid-data]]'));
 	}
+	toggleFollow('unfollow', socket.uid, data.uid, callback);
 };
 
 function toggleFollow(method, uid, theiruid, callback) {
@@ -177,28 +209,34 @@ SocketUser.saveSettings = function(socket, data, callback) {
 		return callback(new Error('[[error:invalid-data]]'));
 	}
 
-	user.isAdminOrSelf(socket.uid, data.uid, function(err) {
-		if (err) {
-			return callback(err);
+	async.waterfall([
+		function(next) {
+			if (socket.uid === parseInt(data.uid, 10)) {
+				return next(null, true);
+			}
+			user.isAdminOrGlobalMod(socket.uid, next);
+		},
+		function(allowed, next) {
+			if (!allowed) {
+				return next(new Error('[[error:no-privileges]]'));
+			}
+			user.saveSettings(data.uid, data.settings, next);
 		}
-		user.saveSettings(data.uid, data.settings, callback);
-	});
+	], callback);
 };
 
 SocketUser.setTopicSort = function(socket, sort, callback) {
-	if (socket.uid) {
-		user.setSetting(socket.uid, 'topicPostSort', sort, callback);
+	if (!socket.uid) {
+		return callback();
 	}
+	user.setSetting(socket.uid, 'topicPostSort', sort, callback);
 };
 
 SocketUser.setCategorySort = function(socket, sort, callback) {
-	if (socket.uid) {
-		user.setSetting(socket.uid, 'categoryTopicSort', sort, callback);
+	if (!socket.uid) {
+		return callback();
 	}
-};
-
-SocketUser.getOnlineAnonCount = function(socket, data, callback) {
-	callback(null, module.parent.exports.getOnlineAnonCount());
+	user.setSetting(socket.uid, 'categoryTopicSort', sort, callback);
 };
 
 SocketUser.getUnreadCount = function(socket, data, callback) {
@@ -221,61 +259,86 @@ SocketUser.getUnreadCounts = function(socket, data, callback) {
 	}
 	async.parallel({
 		unreadTopicCount: async.apply(topics.getTotalUnread, socket.uid),
+		unreadNewTopicCount: async.apply(topics.getTotalUnread, socket.uid, 'new'),
 		unreadChatCount: async.apply(messaging.getUnreadCount, socket.uid),
 		unreadNotificationCount: async.apply(user.notifications.getUnreadCount, socket.uid)
 	}, callback);
 };
 
-SocketUser.loadMore = function(socket, data, callback) {
-	if (!data || !data.set || parseInt(data.after, 10) < 0) {
+SocketUser.invite = function(socket, email, callback) {
+	if (!email || !socket.uid) {
 		return callback(new Error('[[error:invalid-data]]'));
 	}
 
-	if (!socket.uid && !!parseInt(meta.config.privateUserInfo, 10)) {
-		return callback(new Error('[[error:no-privileges]]'));
-	}
+	var registrationType = meta.config.registrationType;
 
-	var start = parseInt(data.after, 10),
-		stop = start + 19;
-
-	async.parallel({
-		isAdmin: function(next) {
-			user.isAdministrator(socket.uid, next);
-		},
-		users: function(next) {
-			user.getUsersFromSet(data.set, socket.uid, start, stop, next);
-		}
-	}, function(err, results) {
-		if (err) {
-			return callback(err);
-		}
-
-
-		if (!results.isAdmin && data.set === 'users:online') {
-			results.users = results.users.filter(function(user) {
-				return user.status !== 'offline';
-			});
-		}
-		var result = {
-			users: results.users,
-			nextStart: stop + 1,
-		};
-		result['route_' + data.set] = true;
-		callback(null, result);
-	});
-};
-
-SocketUser.invite = function(socket, email, callback) {
-	if (!email || !socket.uid) {
-		return callback(new Error('[[error:invald-data]]'));
-	}
-
-	if (meta.config.registrationType !== 'invite-only') {
+	if (registrationType !== 'invite-only' && registrationType !== 'admin-invite-only') {
 		return callback(new Error('[[error:forum-not-invite-only]]'));
 	}
 
-	user.sendInvitationEmail(socket.uid, email, callback);
+	var max = meta.config.maximumInvites;
+
+	user.isAdministrator(socket.uid, function(err, admin) {
+		if (err) {
+			return callback(err);
+		}
+		if (registrationType === 'admin-invite-only' && !admin) {
+			return callback(new Error('[[error:no-privileges]]'));
+		}
+		if (max) {
+			async.waterfall([
+				function(next) {
+					user.getInvitesNumber(socket.uid, next);
+				},
+				function(invites, next) {
+					if (!admin && invites > max) {
+						return next(new Error('[[error:invite-maximum-met, ' + invites + ', ' + max + ']]'));
+					}
+					next();
+				},
+				function(next) {
+					user.sendInvitationEmail(socket.uid, email, next);
+				}
+			], callback);
+		} else {
+			user.sendInvitationEmail(socket.uid, email, callback);
+		}
+	});
+
 };
 
+SocketUser.getUserByUID = function(socket, uid, callback) {
+	apiController.getUserDataByField(socket.uid, 'uid', uid, callback);
+};
+
+SocketUser.getUserByUsername = function(socket, username, callback) {
+	apiController.getUserDataByField(socket.uid, 'username', username, callback);
+};
+
+SocketUser.getUserByEmail = function(socket, email, callback) {
+	apiController.getUserDataByField(socket.uid, 'email', email, callback);
+};
+
+SocketUser.setModerationNote = function(socket, data, callback) {
+	if (!socket.uid || !data || !data.uid) {
+		return callback(new Error('[[error:invalid-data]]'));
+	}
+
+	async.waterfall([
+		function(next) {
+			user.isAdminOrGlobalMod(socket.uid, next);
+		},
+		function(isAdminOrGlobalMod, next) {
+			if (!isAdminOrGlobalMod) {
+				return next(new Error('[[error:no-privileges]]'));
+			}
+			if (data.note) {
+				user.setUserField(data.uid, 'moderationNote', data.note, next);
+			} else {
+				db.deleteObjectField('user:' + data.uid, 'moderationNote', next);
+			}
+		}
+	], callback);
+};
 
 module.exports = SocketUser;

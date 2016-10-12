@@ -1,12 +1,8 @@
 
 'use strict';
 
-var async = require('async'),
-	db = require('../database'),
-	meta = require('../meta'),
-	user = require('../user'),
-	groups = require('../groups'),
-	categories = require('../categories');
+var async = require('async');
+var groups = require('../groups');
 
 var helpers = {};
 
@@ -20,9 +16,19 @@ helpers.some = function(tasks, callback) {
 	});
 };
 
-helpers.isUserAllowedTo = function(privilege, uid, cids, callback) {
+helpers.isUserAllowedTo = function(privilege, uid, cid, callback) {
+	if (Array.isArray(privilege) && !Array.isArray(cid)) {
+		isUserAllowedToPrivileges(privilege, uid, cid, callback);
+	} else if (Array.isArray(cid) && !Array.isArray(privilege)) {
+		isUserAllowedToCids(privilege, uid, cid, callback);
+	} else {
+		return callback(new Error('[[error:invalid-data]]'));
+	}
+};
+
+function isUserAllowedToCids(privilege, uid, cids, callback) {
 	if (parseInt(uid, 10) === 0) {
-		return isGuestAllowedTo(privilege, cids, callback);
+		return isGuestAllowedToCids(privilege, cids, callback);
 	}
 
 	var userKeys = [], groupKeys = [];
@@ -50,7 +56,40 @@ helpers.isUserAllowedTo = function(privilege, uid, cids, callback) {
 
 		callback(null, result);
 	});
-};
+}
+
+function isUserAllowedToPrivileges(privileges, uid, cid, callback) {
+	if (parseInt(uid, 10) === 0) {
+		return isGuestAllowedToPrivileges(privileges, cid, callback);
+	}
+
+	var userKeys = [], groupKeys = [];
+	for (var i=0; i<privileges.length; ++i) {
+		userKeys.push('cid:' + cid + ':privileges:' + privileges[i]);
+		groupKeys.push('cid:' + cid + ':privileges:groups:' + privileges[i]);
+	}
+
+	async.parallel({
+		hasUserPrivilege: function(next) {
+			groups.isMemberOfGroups(uid, userKeys, next);
+		},
+		hasGroupPrivilege: function(next) {
+			groups.isMemberOfGroupsList(uid, groupKeys, next);
+		}
+	}, function(err, results) {
+		if (err) {
+			return callback(err);
+		}
+
+		var result = [];
+		for (var i=0; i<privileges.length; ++i) {
+			result.push(results.hasUserPrivilege[i] || results.hasGroupPrivilege[i]);
+		}
+
+		callback(null, result);
+	});
+}
+
 
 helpers.isUsersAllowedTo = function(privilege, uids, cid, callback) {
 	async.parallel({
@@ -74,7 +113,7 @@ helpers.isUsersAllowedTo = function(privilege, uids, cid, callback) {
 	});
 };
 
-function isGuestAllowedTo(privilege, cids, callback) {
+function isGuestAllowedToCids(privilege, cids, callback) {
 	var groupKeys = [];
 	for (var i=0; i<cids.length; ++i) {
 		groupKeys.push('cid:' + cids[i] + ':privileges:groups:' + privilege);
@@ -83,5 +122,13 @@ function isGuestAllowedTo(privilege, cids, callback) {
 	groups.isMemberOfGroups('guests', groupKeys, callback);
 }
 
+function isGuestAllowedToPrivileges(privileges, cid, callback) {
+	var groupKeys = [];
+	for (var i=0; i<privileges.length; ++i) {
+		groupKeys.push('cid:' + cid + ':privileges:groups:' + privileges[i]);
+	}
+
+	groups.isMemberOfGroups('guests', groupKeys, callback);
+}
 
 module.exports = helpers;

@@ -1,25 +1,27 @@
 
 'use strict';
 
-var async = require('async'),
-	winston = require('winston'),
-
-	db = require('../database'),
-	user = require('../user'),
-	posts = require('../posts'),
-	privileges = require('../privileges'),
-	plugins = require('../plugins');
+var async = require('async');
+var winston = require('winston');
+var db = require('../database');
+var user = require('../user');
+var posts = require('../posts');
+var privileges = require('../privileges');
+var plugins = require('../plugins');
+var meta = require('../meta');
 
 
 module.exports = function(Topics) {
 
-	Topics.createTopicFromPosts = function(uid, title, pids, callback) {
+	Topics.createTopicFromPosts = function(uid, title, pids, fromTid, callback) {
 		if (title) {
 			title = title.trim();
 		}
 
-		if (!title) {
-			return callback(new Error('[[error:invalid-title]]'));
+		if (title.length < parseInt(meta.config.minimumTitleLength, 10)) {
+			return callback(new Error('[[error:title-too-short, ' + meta.config.minimumTitleLength + ']]'));
+		} else if (title.length > parseInt(meta.config.maximumTitleLength, 10)) {
+			return callback(new Error('[[error:title-too-long, ' + meta.config.maximumTitleLength + ']]'));
 		}
 
 		if (!pids || !pids.length) {
@@ -53,11 +55,14 @@ module.exports = function(Topics) {
 				}
 				Topics.create({uid: results.postData.uid, title: title, cid: cid}, next);
 			},
+			function(results, next) {
+				Topics.updateTopicBookmarks(fromTid, pids, function(){ next( null, results );} );
+			},
 			function(_tid, next) {
 				function move(pid, next) {
 					privileges.posts.canEdit(pid, uid, function(err, canEdit) {
-						if(err || !canEdit) {
-							return next(err);
+						if (err || !canEdit.flag) {
+							return next(err || new Error(canEdit.message));
 						}
 
 						Topics.movePostToTopic(pid, tid, next);
@@ -85,7 +90,7 @@ module.exports = function(Topics) {
 				if (!exists) {
 					return next(new Error('[[error:no-topic]]'));
 				}
-				posts.getPostFields(pid, ['tid', 'timestamp', 'votes'], next);
+				posts.getPostFields(pid, ['tid', 'uid', 'timestamp', 'upvotes', 'downvotes'], next);
 			},
 			function(post, next) {
 				if (!post || !post.tid) {
@@ -99,7 +104,7 @@ module.exports = function(Topics) {
 				postData = post;
 				postData.pid = pid;
 
-				Topics.removePostFromTopic(postData.tid, pid, next);
+				Topics.removePostFromTopic(postData.tid, postData, next);
 			},
 			function(next) {
 				async.parallel([
@@ -116,7 +121,7 @@ module.exports = function(Topics) {
 						posts.setPostField(pid, 'tid', tid, next);
 					},
 					function(next) {
-						Topics.addPostToTopic(tid, pid, postData.timestamp, postData.votes, next);
+						Topics.addPostToTopic(tid, postData, next);
 					}
 				], next);
 			},
