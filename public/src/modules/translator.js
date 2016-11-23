@@ -1,9 +1,9 @@
-/* global define, jQuery, config, RELATIVE_PATH, utils, window, Promise */
+/* global define, jQuery, config, utils, window, Promise */
 
 (function (factory) {
 	'use strict';
-	function loadClient(language, filename) {
-		return Promise.resolve(jQuery.getJSON(config.relative_path + '/language/' + language + '/' + (filename + '.json?v=' + config['cache-buster'])));
+	function loadClient(language, namespace) {
+		return Promise.resolve(jQuery.getJSON(config.relative_path + '/api/language/' + language + '/' + namespace));
 	}
 	if (typeof define === 'function' && define.amd) {
 		// AMD. Register as a named module
@@ -16,9 +16,9 @@
 			require('promise-polyfill');
 			var languages = require('../../../src/languages');
 
-			function loadServer(language, filename) {
+			function loadServer(language, namespace) {
 				return new Promise(function (resolve, reject) {
-					languages.get(language, filename + '.json', function (err, data) {
+					languages.get(language, namespace, function (err, data) {
 						if (err) {
 							reject(err);
 						} else {
@@ -29,29 +29,41 @@
 			}
 
 			module.exports = factory(require('string'), loadServer);
-		})();
+		}());
 	} else {
 		window.translator = factory(window.string, loadClient);
 	}
-})(function (string, load) {
+}(function (string, load) {
 	'use strict';
 	var assign = Object.assign || jQuery.extend;
 	function classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
-	var Translator = function () {
+	var Translator = (function () {
 		/**
 		 * Construct a new Translator object
 		 * @param {string} language - Language code for this translator instance
 		 */
 		function Translator(language) {
-			classCallCheck(this, Translator);
+			var self = this;
+			classCallCheck(self, Translator);
 
 			if (!language) {
 				throw new TypeError('Parameter `language` must be a language string. Received ' + language + (language === '' ? '(empty string)' : ''));
 			}
 
-			this.lang = language;
-			this.translations = {};
+			self.modules = Object.keys(Translator.moduleFactories).map(function (namespace) {
+				var factory = Translator.moduleFactories[namespace];
+				return [namespace, factory(language)];
+			}).reduce(function (prev, elem) {
+				var namespace = elem[0];
+				var module = elem[1];
+				prev[namespace] = module;
+
+				return prev;
+			}, {});
+
+			self.lang = language;
+			self.translations = {};
 		}
 
 		Translator.prototype.load = load;
@@ -62,6 +74,11 @@
 		 * @returns {Promise<string>}
 		 */
 		Translator.prototype.translate = function translate(str) {
+			// regex for valid text in namespace / key
+			var validText = 'a-zA-Z0-9\\-_.\\/';
+			var validTextRegex = new RegExp('[' + validText + ']');
+			var invalidTextRegex = new RegExp('[^' + validText + '\\]]');
+
 			// current cursor position
 			var cursor = 0;
 			// last break of the input string
@@ -120,12 +137,45 @@
 					// the current level of nesting of the translation strings
 					var level = 0;
 					var sliced;
+					// validating the current string is actually a translation
+					var textBeforeColonFound = false;
+					var colonFound = false;
+					var textAfterColonFound = false;
+					var commaAfterNameFound = false;
 
 					while (cursor + 2 <= len) {
 						sliced = str.slice(cursor, cursor + 2);
+						// found some text after the double bracket, 
+						// so this is probably a translation string
+						if (!textBeforeColonFound && validTextRegex.test(sliced[0])) {
+							textBeforeColonFound = true;
+							cursor += 1;
+						// found a colon, so this is probably a translation string
+						} else if (textBeforeColonFound && !colonFound && sliced[0] === ':') {
+							colonFound = true;
+							cursor += 1;
+						// found some text after the colon,
+						// so this is probably a translation string
+						} else if (colonFound && !textAfterColonFound && validTextRegex.test(sliced[0])) {
+							textAfterColonFound = true;
+							cursor += 1;
+						} else if (textAfterColonFound && !commaAfterNameFound && sliced[0] === ',') {
+							commaAfterNameFound = true;
+							cursor += 1;
+						// a space or comma was found before the name
+						// this isn't a translation string, so back out
+						} else if (!(textBeforeColonFound && colonFound && textAfterColonFound && commaAfterNameFound) && 
+								invalidTextRegex.test(sliced[0])) {
+							cursor += 1;
+							lastBreak -= 2;
+							if (level > 0) {
+								level -= 1;
+							} else {
+								break;
+							}
 						// if we're at the beginning of another translation string,
 						// we're nested, so add to our level
-						if (sliced === '[[') {
+						} else if (sliced === '[[') {
 							level += 1;
 							cursor += 2;
 						// if we're at the end of a translation string
@@ -183,6 +233,10 @@
 			var namespace = result[0];
 			var key = result[1];
 
+			if (self.modules[namespace]) {
+				return Promise.resolve(self.modules[namespace](key, args));
+			}
+
 			if (namespace && !key) {
 				return Promise.resolve('[[' + namespace + ']]');
 			}
@@ -223,11 +277,8 @@
 			if (!namespace) {
 				console.warn('[translator] Parameter `namespace` is ' + namespace + (namespace === '' ? '(empty string)' : ''));
 				translation = Promise.resolve({});
-			} else if (this.translations[namespace]) {
-				translation = this.translations[namespace];
 			} else {
-				translation = this.load(this.lang, namespace);
-				this.translations[namespace] = translation;
+				translation = this.translations[namespace] = this.translations[namespace] || this.load(this.lang, namespace);
 			}
 
 			if (key) {
@@ -246,10 +297,10 @@
 			var lang;
 
 			if (typeof window === 'object' && window.config && window.utils) {
-				lang = utils.params().lang || config.userLang || config.defaultLang || 'en_GB';
+				lang = utils.params().lang || config.userLang || config.defaultLang || 'en-GB';
 			} else {
 				var meta = require('../../../src/meta');
-				lang = meta.config.defaultLang || 'en_GB';
+				lang = meta.config.defaultLang || 'en-GB';
 			}
 
 			return lang;
@@ -257,7 +308,7 @@
 
 		/**
 		 * Create and cache a new Translator instance, or return a cached one
-		 * @param {string} [language] - ('en_GB') Language string
+		 * @param {string} [language] - ('en-GB') Language string
 		 * @returns {Translator}
 		 */
 		Translator.create = function create(language) {
@@ -272,8 +323,24 @@
 
 		Translator.cache = {};
 
+		/**
+		 * Register a custom module to handle translations
+		 * @param {string} namespace - Namespace to handle translation for
+		 * @param {Function} factory - Function to return the translation function for this namespace
+		 */
+		Translator.registerModule = function registerModule(namespace, factory) {
+			Translator.moduleFactories[namespace] = factory;
+
+			Object.keys(Translator.cache).forEach(function (key) {
+				var translator = Translator.cache[key];
+				translator.modules[namespace] = factory(translator.lang);
+			});
+		};
+
+		Translator.moduleFactories = {};
+
 		return Translator;
-	}();
+	}());
 
 	var adaptor = {
 		/**
@@ -334,8 +401,8 @@
 		/**
 		 * Add translations to the cache
 		 */
-		addTranslation: function addTranslation(language, filename, translation) {
-			Translator.create(language).getTranslation(filename).then(function (translations) {
+		addTranslation: function addTranslation(language, namespace, translation) {
+			Translator.create(language).getTranslation(namespace).then(function (translations) {
 				assign(translations, translation);
 			});
 		},
@@ -343,16 +410,16 @@
 		/**
 		 * Get the translations object
 		 */
-		getTranslations: function getTranslations(language, filename, callback) {
+		getTranslations: function getTranslations(language, namespace, callback) {
 			callback = callback || function () {};
-			Translator.create(language).getTranslation(filename).then(callback);
+			Translator.create(language).getTranslation(namespace).then(callback);
 		},
 
 		/**
 		 * Alias of getTranslations
 		 */
-		load: function load(language, filename, callback) {
-			adaptor.getTranslations(language, filename, callback);
+		load: function load(language, namespace, callback) {
+			adaptor.getTranslations(language, namespace, callback);
 		},
 
 		/**
@@ -370,16 +437,16 @@
 			// and correct NodeBB language codes to timeago codes, if necessary
 			var languageCode = void 0;
 			switch (config.userLang) {
-				case 'en_GB':
-				case 'en_US':
+				case 'en-GB':
+				case 'en-US':
 					languageCode = 'en';
 					break;
 
-				case 'fa_IR':
+				case 'fa-IR':
 					languageCode = 'fa';
 					break;
 
-				case 'pt_BR':
+				case 'pt-BR':
 					languageCode = 'pt-br';
 					break;
 
@@ -387,25 +454,17 @@
 					languageCode = 'no';
 					break;
 
-				case 'zh_TW':
-					languageCode = 'zh-TW';
-					break;
-
-				case 'zh_CN':
-					languageCode = 'zh-CN';
-					break;
-
 				default:
 					languageCode = config.userLang;
 					break;
 			}
 
-			jQuery.getScript(RELATIVE_PATH + '/vendor/jquery/timeago/locales/jquery.timeago.' + languageCode + '.js').done(function () {
+			jQuery.getScript(config.relative_path + '/vendor/jquery/timeago/locales/jquery.timeago.' + languageCode + '.js').done(function () {
 				jQuery('.timeago').timeago();
 				adaptor.timeagoShort = assign({}, jQuery.timeago.settings.strings);
 
 				// Retrieve the shorthand timeago values as well
-				jQuery.getScript(RELATIVE_PATH + '/vendor/jquery/timeago/locales/jquery.timeago.' + languageCode + '-short.js').done(function () {
+				jQuery.getScript(config.relative_path + '/vendor/jquery/timeago/locales/jquery.timeago.' + languageCode + '-short.js').done(function () {
 					// Switch back to long-form
 					adaptor.toggleTimeagoShorthand();
 				});
@@ -421,4 +480,4 @@
 	};
 
 	return adaptor;
-});
+}));

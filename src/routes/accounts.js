@@ -7,7 +7,7 @@ module.exports = function (app, middleware, controllers) {
 	var middlewares = [middleware.checkGlobalPrivacySettings];
 	var accountMiddlewares = [middleware.checkGlobalPrivacySettings, middleware.checkAccountPermissions];
 
-	setupPageRoute(app, '/uid/:uid/:section?', middleware, [], middleware.redirectUidToUserslug);
+	setupPageRoute(app, '/uid/:uid/:section1?/:section2?', middleware, [], middleware.redirectUidToUserslug);
 
 	setupPageRoute(app, '/user/:userslug', middleware, middlewares, controllers.accounts.profile.get);
 	setupPageRoute(app, '/user/:userslug/following', middleware, middlewares, controllers.accounts.follow.getFollowing);
@@ -32,5 +32,5 @@ module.exports = function (app, middleware, controllers) {
 
 	setupPageRoute(app, '/notifications', middleware, [middleware.authenticate], controllers.accounts.notifications.get);
 	setupPageRoute(app, '/user/:userslug/chats/:roomid?', middleware, middlewares, controllers.accounts.chats.get);
-	setupPageRoute(app, '/chats/:roomid?', middleware, [], controllers.accounts.chats.redirectToChat);
+	setupPageRoute(app, '/chats/:roomid?', middleware, [middleware.authenticate], controllers.accounts.chats.redirectToChat);
 };

@@ -1,18 +1,10 @@
-<div class="manage-users">
-
+<div class="row manage-users">
 	<div class="col-lg-12">
 		<div class="panel panel-default">
 			<div class="panel-heading"><i class="fa fa-user"></i> Users</div>
 			<div class="panel-body">
-				<ul class="nav nav-pills">
-					<li><a href='{config.relative_path}/admin/manage/users/latest'>Latest Users</a></li>
-					<li><a href='{config.relative_path}/admin/manage/users/not-validated'>Not validated</a></li>
-					<li><a href='{config.relative_path}/admin/manage/users/no-posts'>No Posts</a></li>
-					<li><a href='{config.relative_path}/admin/manage/users/inactive'>Inactive</a></li>
-					<li><a href='{config.relative_path}/admin/manage/users/flagged'>Most Flags</a></li>
-					<li><a href='{config.relative_path}/admin/manage/users/banned'>Banned</a></li>
-					<li><a href='{config.relative_path}/admin/manage/users/search'>User Search</a></li>
 
+				<div class="clearfix">
 					<div class="btn-group pull-right">
 						<button class="btn btn-default dropdown-toggle" data-toggle="dropdown" type="button">Edit <span class="caret"></span></button>
 						<ul class="dropdown-menu">
@@ -43,11 +35,23 @@
 					<!-- ENDIF inviteOnly -->
 
 					<button id="createUser" class="btn btn-primary pull-right">New User</button>
+				</div>
+
+				<ul class="nav nav-pills">
+					<li><a href='{config.relative_path}/admin/manage/users/latest'>Latest Users</a></li>
+					<li><a href='{config.relative_path}/admin/manage/users/not-validated'>Not validated</a></li>
+					<li><a href='{config.relative_path}/admin/manage/users/no-posts'>No Posts</a></li>
+					<li><a href='{config.relative_path}/admin/manage/users/top-posters'>Top Posters</a></li>
+					<li><a href='{config.relative_path}/admin/manage/users/most-reputation'>Most Reputation</a></li>
+					<li><a href='{config.relative_path}/admin/manage/users/inactive'>Inactive</a></li>
+					<li><a href='{config.relative_path}/admin/manage/users/flagged'>Most Flags</a></li>
+					<li><a href='{config.relative_path}/admin/manage/users/banned'>Banned</a></li>
+					<li><a href='{config.relative_path}/admin/manage/users/search'>User Search</a></li>
 				</ul>
 
 				<br />
 
-				<div class="search {search_display} well">
+				<div class="search {search_display}">
 					<label>By User Name</label>
 					<input class="form-control" id="search-user-name" data-search-type="username" type="text" placeholder="Enter a username to search"/><br />
 
@@ -67,39 +71,41 @@
 				<a href="{config.relative_path}/admin/manage/users/inactive?months=12" class="btn btn-default">12 months</a>
 				<!-- ENDIF inactive -->
 
-				<table class="table table-striped users-table">
-					<tr>
-						<th><input component="user/select/all" type="checkbox"/></th>
-						<th>uid</th>
-						<th>username</th>
-						<th>email</th>
-						<th class="text-right">postcount</th>
-						<th class="text-right">reputation</th>
-						<th class="text-right">flags</th>
-						<th>joined</th>
-						<th>last online</th>
-						<th>banned</th>
-					</tr>
-					<!-- BEGIN users -->
-					<tr class="user-row">
-						<th><input component="user/select/single" data-uid="{users.uid}" type="checkbox"/></th>
-						<td class="text-right">{users.uid}</td>
-						<td><i class="administrator fa fa-shield text-success<!-- IF !users.administrator --> hidden<!-- ENDIF !users.administrator -->"></i><a href="{config.relative_path}/user/{users.userslug}"> {users.username}</a></td>
-
-						<td>
-						<!-- IF config.requireEmailConfirmation -->
-						<i class="validated fa fa-check text-success<!-- IF !users.email:confirmed --> hidden<!-- ENDIF !users.email:confirmed -->" title="validated"></i>
-						<i class="notvalidated fa fa-times text-danger<!-- IF users.email:confirmed --> hidden<!-- ENDIF users.email:confirmed -->" title="not validated"></i>
-						<!-- ENDIF config.requireEmailConfirmation --> {users.email}</td>
-						<td class="text-right">{users.postcount}</td>
-						<td class="text-right">{users.reputation}</td>
-						<td class="text-right"><!-- IF users.flags -->{users.flags}<!-- ELSE -->0<!-- ENDIF users.flags --></td>
-						<td><span class="timeago" title="{users.joindateISO}"></span></td>
-						<td><span class="timeago" title="{users.lastonlineISO}"></span></td>
-						<td class="text-center"><i class="ban fa fa-gavel text-danger<!-- IF !users.banned --> hidden<!-- ENDIF !users.banned -->"></i></td>
-					</tr>
-					<!-- END users -->
-				</table>
+				<div class="table-responsive">
+					<table class="table table-striped users-table">
+						<tr>
+							<th><input component="user/select/all" type="checkbox"/></th>
+							<th>uid</th>
+							<th>username</th>
+							<th>email</th>
+							<th class="text-right">postcount</th>
+							<th class="text-right">reputation</th>
+							<th class="text-right">flags</th>
+							<th>joined</th>
+							<th>last online</th>
+							<th>banned</th>
+						</tr>
+						<!-- BEGIN users -->
+						<tr class="user-row">
+							<th><input component="user/select/single" data-uid="{users.uid}" type="checkbox"/></th>
+							<td class="text-right">{users.uid}</td>
+							<td><i class="administrator fa fa-shield text-success<!-- IF !users.administrator --> hidden<!-- ENDIF !users.administrator -->"></i><a href="{config.relative_path}/user/{users.userslug}"> {users.username}</a></td>
+	
+							<td>
+							<!-- IF config.requireEmailConfirmation -->
+							<i class="validated fa fa-check text-success<!-- IF !users.email:confirmed --> hidden<!-- ENDIF !users.email:confirmed -->" title="validated"></i>
+							<i class="notvalidated fa fa-times text-danger<!-- IF users.email:confirmed --> hidden<!-- ENDIF users.email:confirmed -->" title="not validated"></i>
+							<!-- ENDIF config.requireEmailConfirmation --> {users.email}</td>
+							<td class="text-right">{users.postcount}</td>
+							<td class="text-right">{users.reputation}</td>
+							<td class="text-right"><!-- IF users.flags -->{users.flags}<!-- ELSE -->0<!-- ENDIF users.flags --></td>
+							<td><span class="timeago" title="{users.joindateISO}"></span></td>
+							<td><span class="timeago" title="{users.lastonlineISO}"></span></td>
+							<td class="text-center"><i class="ban fa fa-gavel text-danger<!-- IF !users.banned --> hidden<!-- ENDIF !users.banned -->"></i></td>
+						</tr>
+						<!-- END users -->
+					</table>
+				</div>
 
 				<!-- IMPORT partials/paginator.tpl -->
 			</div>
